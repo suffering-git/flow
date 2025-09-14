@@ -1,0 +1,57 @@
+- Project Core
+    - Python-based tool for YouTube data scraping (transcripts & comments).
+    - Informs a market garden/orchard business plan with a regenerative ag focus.
+    - AI pipeline structures raw data into summaries and atomic insights.
+    - Hybrid search (full-text + semantic) for comprehensive data discovery.
+- Data Fetching
+    - Downloads ALL video transcripts and ALL comments for specified channels.
+    - Transcripts are fetched asynchronously using rotating Webshare proxies.
+        -webshare methods built in to youtube_transcript_api
+    - Comments are fetched sequentially with a configurable delay to respect rate limits.
+- Processing & Pipeline
+    - Resumable processing: script can be stopped and restarted without re-doing work.
+        - Uses a `VideoProcessingStatus` table in the database to track state.
+        - Enforces dependencies: Stage 1 -> Stage 2 -> Stage 3.
+    - Stage 1 (Extract & Summarize):
+        - A cost-effective AI (Gemini Flash) processes raw transcript and comments.
+        - Extracts and organizes data into topic-based paragraph summaries.
+        - Attributes each summary's source to either 'transcript' or 'comment'.
+    - Stage 2 (Refine & Atomize):
+        - A powerful AI (Gemini Pro) processes Stage 1 summaries for a video.
+        - Filters out low-value content.
+        - Breaks down valuable content into atomic insights.
+        - Classifies insights as `quantitative` or `qualitative`.
+    - Stage 3 (Generate Embeddings):
+        - Generates vector embeddings for all atomic insights using Gemini's API.
+        - Stores vectors in the database for semantic search.
+- Search System
+    - Hybrid search combines two methods for querying atomic insights.
+    - Full-Text Search (FTS5): For exact keyword matching (e.g., "lettuce pricing").
+    - Vector Similarity Search (sqlite-vec): For conceptual queries.
+        - User's search query is converted to an embedding at query-time.
+        - Results can be filtered by a similarity threshold.
+- Configuration & Management
+    - A central `config.py` file manages all user settings.
+        - Target YouTube channels, AI model names, update intervals.
+    - Manual rate limiting controls for API calls are set in `config.py`.
+        - Separate concurrency limits for different Gemini models.
+    - Credentials (API keys, proxy info) are stored in a secure `.env` file.
+- Utilities & Reliability
+    - Database Reset Utility: Safely clears all AI-processed data for re-running.
+        - Preserves all raw downloaded data (transcripts, comments) and metadata.
+    - Simplified Query Interface: User-friendly Python functions to query the database.
+    - Data Validation: Pydantic models validate the structure of AI outputs.
+    - Data Integrity: Database transactions with rollback prevent corruption on crash.
+- Error Handling
+    - Differentiates between permanent and transient errors to avoid crashing.
+    - Permanent errors (e.g., comments disabled) are logged and skipped in future runs.
+    - Transient errors (e.g., network timeout) are logged and retried on the next run.
+- Logging System
+    - Comprehensive, industry-standard logging framework.
+    - Uses emoji indicators for clear visual feedback (✅, ❌, 🟡, 🔄, 📊, ℹ️, 🎯).
+    - Cross-platform colored console output for enhanced readability.
+    - Structured log format: timestamp, level, module, emoji, and message.
+    - Rate Limit & Cost Monitoring:
+        - Tracks and logs Gemini API usage against official limits.
+        - Issues warnings at configurable thresholds (e.g., 50%, 75%, 90% of RPM).
+        - Reports estimated costs based on token usage.
