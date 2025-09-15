@@ -1,13 +1,11 @@
-# **Project Scope and Technical Specification: YouTube Data Scraper & Processor**
-
-- [**Project Scope and Technical Specification: YouTube Data Scraper \& Processor**](#project-scope-and-technical-specification-youtube-data-scraper--processor)
-  - [**Project Summary**](#project-summary)
-  - [**System Overview**](#system-overview)
-  - [**Technical Stack**](#technical-stack)
-  - [**Implementation Details / Logic**](#implementation-details--logic)
-  - [**Key Structures**](#key-structures)
-      - [**AI Response Data Structures**](#ai-response-data-structures)
-      - [**Data Model / Schema**](#data-model--schema)
+# **Project Scope and Technical Specification: YouTube Data Scraper & Processor**<!-- omit in toc -->
+- [**Project Summary**](#project-summary)
+- [**System Overview**](#system-overview)
+- [**Technical Stack**](#technical-stack)
+- [**Implementation Details / Logic**](#implementation-details--logic)
+- [**Key Structures**](#key-structures)
+    - [**AI Response Data Structures**](#ai-response-data-structures)
+    - [**Data Model / Schema**](#data-model--schema)
 
 
 ## **Project Summary**
