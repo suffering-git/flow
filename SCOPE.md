@@ -9,15 +9,14 @@
     - [**Configuration:**](#configuration)
     - [**Credentials:**](#credentials)
     - [**Logging System:**](#logging-system)
-    - [**Data Validation:**](#data-validation)
+    - [**Data Integrity (Database Transactions):**](#data-integrity-database-transactions)
+    - [**Error Handling:**](#error-handling)
     - [**Idempotency \& State Management:**](#idempotency--state-management)
     - [**Channel \& Video Setup Logic:**](#channel--video-setup-logic)
     - [**Data Fetching \& Translation:**](#data-fetching--translation)
-    - [**Data Integrity (Database Transactions):**](#data-integrity-database-transactions)
-    - [**Error Handling:**](#error-handling)
     - [**AI Processing Pipeline (3-Stage, Fully Decoupled):**](#ai-processing-pipeline-3-stage-fully-decoupled)
-    - [**Database Reset Logic:**](#database-reset-logic)
     - [**Hybrid Search System:**](#hybrid-search-system)
+    - [**Database Reset Logic:**](#database-reset-logic)
 - [**Key Structures**](#key-structures)
     - [**AI Response Data Structures**](#ai-response-data-structures)
     - [**Data Model / Schema**](#data-model--schema)
@@ -82,9 +81,14 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Structured Format:** Timestamp, log level, module name, emoji indicator, and detailed message.
     *   📊 **Rate Limit & Cost Monitoring:** Tracks and periodically logs Gemini API usage summaries (every N requests or X tokens, both configurable) to monitor Requests Per Minute (RPM) and Tokens Per Minute (TPM). Issues `🟡` warning messages when usage exceeds configurable thresholds (e.g., 50%, 75%, 90%) of the official limits. Also reports costs. Logic uses stage-specific model codes from config.py to look up associated rate limits & costs from a dict created according to information from `GEMINI_RATES.md`.
 
-#### **Data Validation:**
-*   Pydantic models will be used to validate ai outputs:
-    *   Models for Stage 1 topic summaries (including source attribution) and Stage 2 atomic insights to ensure required fields are present and properly formatted JSON is returned.
+#### **Data Integrity (Database Transactions):**
+*   To prevent database corruption from a crash during a write operation, the system will employ database transactions with rollback capability on failure.
+
+#### **Error Handling:**
+*   The script will not crash on non-critical errors, with comprehensive logging at each step:
+    *   **Permanent Errors:** If the YouTube API reports that transcripts are disabled or comments are disabled for a video, the `Status` table will be updated with a final state (e.g., 'unavailable', 'disabled'), and the specific error message will be logged with ❌ indicator. The video will be skipped in all future runs.
+    *   **Transient Errors:** For network timeouts, proxy connection errors, or temporary API rate limits, the error will be logged with 🟡 indicator and full traceback, but the video's status in the database will remain unchanged, making it eligible to be retried automatically on the next script run.
+    *   **Success Logging:** Each successful operation will be logged with ✅ indicator, including download completions, processing milestones, database updates, and embedding generation.
 
 #### **Idempotency & State Management:**
 *   The entire pipeline will be resumable and will not repeat completed work. Each stage is fully decoupled, allowing for independent execution and inspection of intermediate results. All asynchronous processes are designed to be pausable, resumable, and gracefully exitable; upon receiving a pause or exit signal, the system will wait for all currently running tasks to fully complete and write their results to the database, ensuring no in-flight requests are dropped.
@@ -107,32 +111,11 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Fallback Logic:** If no transcript is available in any language, the transcript status is marked as 'unavailable'. If translation fails, the system logs the error but stores the original language transcript, allowing manual review or retry with different translation parameters.
 *   **Comments:** Fetched via asynchronous requests to the YouTube Data API v3. The API allows 10,000 units/day quota, with comment fetching costing 1 unit per request (100 max comments per request). A configurable `max_concurrency` setting in `config.py` controls the rate of concurrent comment requests to respect a 10 RPS recommended limit. The system handles API pagination to retrieve all available comments. Comment data is stored directly in the database using `aiosqlite`.
 
-#### **Data Integrity (Database Transactions):**
-*   To prevent database corruption from a crash during a write operation, the system will employ database transactions with rollback capability on failure.
-
-#### **Error Handling:**
-*   The script will not crash on non-critical errors, with comprehensive logging at each step:
-    *   **Permanent Errors:** If the YouTube API reports that transcripts are disabled or comments are disabled for a video, the `Status` table will be updated with a final state (e.g., 'unavailable', 'disabled'), and the specific error message will be logged with ❌ indicator. The video will be skipped in all future runs.
-    *   **Transient Errors:** For network timeouts, proxy connection errors, or temporary API rate limits, the error will be logged with 🟡 indicator and full traceback, but the video's status in the database will remain unchanged, making it eligible to be retried automatically on the next script run.
-    *   **Success Logging:** Each successful operation will be logged with ✅ indicator, including download completions, processing milestones, database updates, and embedding generation.
-
 #### **AI Processing Pipeline (3-Stage, Fully Decoupled):**
 *   The entire pipeline follows the flow: Raw Data → DB → Stage 1 → DB → Stage 2 → DB → Stage 3 → DB → User Queries. The 3-stage AI pipeline extracts and summarizes raw data into topic-based summaries, then refines and atomizes this content into two distinct data types: `quantitative` (numerical insights) and `qualitative` (descriptive insights), and finally generates embeddings for semantic search. Each stage runs independently on the previous level of data and saves its output to the database. Rate limiting is controlled by three distinct 'max concurrent requests' values in `config.py` to independently control asynchronous request limits for each Gemini model (stages 1, 2, 3).
     *   **Stage 1 (Extract & Summarize):** **Input:** Raw text from both transcript and all comments for a video retrieved from the database, processed together in a single request. **Process:** A cost-effective model (e.g., Gemini Flash) is prompted to extract all valuable data and organize it into paragraph summaries of each major topic discussed, clearly identifying whether each topic originated from the transcript or a comment. **Output:** Multiple topic-based paragraph blurbs stored in the `TopicSummaries` table with source attribution. **Status Update:** `stage_1_status` set to 'complete' with ✅ log entry.
     *   **Stage 2 (Refine & Atomize):** **Input:** All topic blurbs for a video (both transcript and comment-derived) from the `TopicSummaries` table. **Process:** A powerful model (e.g., Gemini Pro) processes the entire video's blurbs at once to: 1) filter out vague or low-value content, and 2) break down the remaining valuable content into atomic records classified as either `quantitative` or `qualitative`. Source attribution is preserved through foreign key relationships. **Output:** Atomic insights stored in the `AtomicInsights` table with foreign key references to their source topic summaries. **Status Update:** `stage_2_status` set to 'complete' with ✅ log entry.
     *   **Stage 3 (Generate Embeddings):** **Input:** All atomic insights for a video from the `AtomicInsights` table. **Process:** Each atomic insight text is sent to Gemini's embedding API to generate a vector representation. **Output:** Embedding vectors stored in the `embedding_vector` column of the `AtomicInsights` table and indexed via sqlite-vec. **Status Update:** `embedding_status` set to 'complete' with ✅ log entry.
-
-#### **Database Reset Logic:**
-*   The system includes a safe reset mechanism for experimentation, enabling complete re-processing with different prompts or models:
-    *   **What Gets Reset:** All AI processing results are cleared from the database:
-        *   All records from `TopicSummaries` table (Stage 1 results)
-        *   All records from `AtomicInsights` table (Stage 2 results and embeddings)
-        *   Processing status flags reset to 'pending' for `stage_1_status`, `stage_2_status`, and `embedding_status` in `Status` table
-    *   **What Gets Preserved:** Raw data and metadata remain intact:
-        *   All raw transcript and comment data stored in the `RawTranscripts` and `RawComments` tables
-        *   All records in `Channels`, `Videos`, and `Status` tables
-        *   Download status flags (`transcript_status`, `comments_status`) remain unchanged
-    *   **Implementation:** A dedicated `reset_processing.py` script provides a safe, logged operation with confirmation prompts and progress indicators using ✅ and 🔄 emoji logging.
 
 #### **Hybrid Search System:**
 *   Offers traditional full-text search (FTS5) for exact word matching and vector similarity search for semantic/conceptual queries across atomic insights. A suite of user-friendly Python functions (in `query_utils.py`) provides both text and semantic search capabilities for retrieving data from the database without needing to write raw SQL while still allowing direct SQL access.
@@ -145,6 +128,18 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Query-Time Embedding Generation:** Each semantic search requires converting the user's search query to an embedding vector via a real-time API call to Gemini's embedding service.
     *   **Search Strategy:** Use FTS5 for exact word searches ("lettuce pricing") and vector search for broader conceptual searches ("sustainable farming practices").
     *   **Sample/Experimental Batch:** A function allows the user to fully pipe a hand-selected batch of specific videos rather than entire channels for experimentation.
+
+#### **Database Reset Logic:**
+*   The system includes a safe reset mechanism for experimentation, enabling complete re-processing with different prompts or models:
+    *   **What Gets Reset:** All AI processing results are cleared from the database:
+        *   All records from `TopicSummaries` table (Stage 1 results)
+        *   All records from `AtomicInsights` table (Stage 2 results and embeddings)
+        *   Processing status flags reset to 'pending' for `stage_1_status`, `stage_2_status`, and `embedding_status` in `Status` table
+    *   **What Gets Preserved:** Raw data and metadata remain intact:
+        *   All raw transcript and comment data stored in the `RawTranscripts` and `RawComments` tables
+        *   All records in `Channels`, `Videos`, and `Status` tables
+        *   Download status flags (`transcript_status`, `comments_status`) remain unchanged
+    *   **Implementation:** A dedicated `reset_processing.py` script provides a safe, logged operation with confirmation prompts and progress indicators using ✅ and 🔄 emoji logging.
   
 ## **Key Structures**
 

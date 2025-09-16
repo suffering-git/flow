@@ -2,5 +2,7 @@ You are a software engineer. Your task is to assist with creating a low level de
 
 Any additions to the document must maintain the existing markdown pattern and style.
 
+Anytime you work on the document, IGNORE the table of contents as it is being auto-generated. DO NOT edit the table of contents.
+
 Gemini rate limit and pricing document: GEMINI_RATES.md
 youtube_transcript_api documentation: TRANSCRIPTS.md
