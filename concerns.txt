@@ -1,0 +1,12 @@
+-how status will be tracked? what columns?
+    -transcripts
+    -comments
+    -what about stage specifically?
+        -stage1_comments & stage1_transcripts?
+        -or just stage1?
+        -same concern for stage 2 & 3
+
+-previous concern also raises/is related to the same concern about the processing: will they be processed separately or not?
+    -one gemini request per transcript and another for comments?
+        -or transcript and all comments combined in one request?
+    -prompt could get lengthy for long videos, up to 150kb worth of tokens (would-be size in a text file). Plus a few hundred comments. But should still be nowhere near gemini's 1mil context window. The only concern is quality/validity of output & its structure (will be designated to be a specific JSON structure so I need the output to have very consistent validity).

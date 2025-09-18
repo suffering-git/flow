@@ -9,12 +9,11 @@
     - [**Configuration:**](#configuration)
     - [**Credentials:**](#credentials)
     - [**Logging System:**](#logging-system)
-    - [**Data Integrity (Database Transactions):**](#data-integrity-database-transactions)
     - [**Error Handling:**](#error-handling)
     - [**Idempotency \& State Management:**](#idempotency--state-management)
     - [**Channel \& Video Setup Logic:**](#channel--video-setup-logic)
     - [**Data Fetching \& Translation:**](#data-fetching--translation)
-    - [**AI Processing Pipeline (3-Stage, Fully Decoupled):**](#ai-processing-pipeline-3-stage-fully-decoupled)
+    - [**3-Stage AI Processing Pipeline:**](#3-stage-ai-processing-pipeline)
     - [**Hybrid Search System:**](#hybrid-search-system)
     - [**Database Reset Logic:**](#database-reset-logic)
 - [**Key Structures**](#key-structures)
@@ -23,7 +22,7 @@
 
 
 ## **Project Summary**
-A Python-based tool to download video transcripts and comments from YouTube channels for market research. The goal is to inform a market garden and orchard business plan focused on regenerative agriculture. The system performs a multi-stage AI processing pipeline on the raw data, structuring it into a normalized database of topic-based summaries and atomic insights. A hybrid search system combines full-text search with AI-powered semantic search via vector embeddings for comprehensive data discovery.
+A Python-based tool to download video transcripts and comments from YouTube channels for market research. This is a personal project and will never be exposed to collaboration on any level, nor does it need to be extendable as this is as wide as the scope foreseeably needs to go. The goal is to inform a market garden and orchard business plan focused on regenerative agriculture. The system performs a multi-stage AI processing pipeline on the raw data, structuring it into a normalized database of topic-based summaries and atomic insights. A hybrid search system combines full-text search with AI-powered semantic search via vector embeddings for comprehensive data discovery. 
 
 ## **System Overview**
 
@@ -65,7 +64,7 @@ A Python-based tool to download video transcripts and comments from YouTube chan
 ## **Implementation Details / Logic**
 
 #### **Configuration:**
-*   A central `config.py` file manages all user-configurable settings. All settings are documented within their respective implementation sections below.
+*   A central `config.py` file manages all user-configurable settings. Settings are documented within their respective implementation sections below (aside from a few I may have forgotten/not thought of).
 
 #### **Credentials:**
 *   All sensitive credentials (YouTube API Key, Gemini API Key, Webshare proxy credentials) will be stored in a `.env` file and loaded into the script's environment using the `python-dotenv` library.
@@ -79,10 +78,7 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Information Indicators:** ℹ️ for general information, 🎯 for important milestones.
     *   **Log Output:** Console output with colored formatting, plus optional file logging for debugging.
     *   **Structured Format:** Timestamp, log level, module name, emoji indicator, and detailed message.
-    *   📊 **Rate Limit & Cost Monitoring:** Tracks and periodically logs Gemini API usage summaries (every N requests or X tokens, both configurable) to monitor Requests Per Minute (RPM) and Tokens Per Minute (TPM). Issues `🟡` warning messages when usage exceeds configurable thresholds (e.g., 50%, 75%, 90%) of the official limits. Also reports costs. Logic uses stage-specific model codes from config.py to look up associated rate limits & costs from a dict created according to information from `GEMINI_RATES.md`.
-
-#### **Data Integrity (Database Transactions):**
-*   To prevent database corruption from a crash during a write operation, the system will employ database transactions with rollback capability on failure.
+    *   📊 **Rate Limit & Cost Monitoring:** Tracks and periodically logs Gemini API usage summaries (every N requests or X tokens, both configurable in `config.py`) to monitor Requests Per Minute (RPM) and Tokens Per Minute (TPM). Issues `🟡` warning messages when usage exceeds configurable thresholds (e.g., 50%, 75%, 90%) of the official limits. Also reports dollar cost of API usage. To get the costs and limits, depending on the processing stage, the logic uses the stage-specific ai model code (e.g. 'stage1_model') set in `config.py` to look up it's associated rate limits & costs from a dict created according to information from `GEMINI_RATES.md`.
 
 #### **Error Handling:**
 *   The script will not crash on non-critical errors, with comprehensive logging at each step:
@@ -98,6 +94,12 @@ A Python-based tool to download video transcripts and comments from YouTube chan
         *   Stage 2 requires completed Stage 1 (topic summaries must exist)
         *   Stage 3 (embeddings) requires completed Stage 2 (atomic insights must exist)
     *   **Single Source of Truth:** The database status table is the authoritative source for all processing state.
+    *   **State Consistency Protection:** To prevent logical inconsistencies where status records indicate completion but actual data is missing, all operations that update both data tables and the `Status` table will be wrapped in transactions. This ensures that if a data insertion fails after a status update, the status change is automatically rolled back, keeping the video eligible for retry on the next run.
+    *   **Critical Transaction Points:** 
+        *   Raw data downloads (transcript/comments + status update)
+        *   AI processing stages (TopicSummaries/AtomicInsights insertion + status update)
+        *   Embedding generation (vector storage + status update)
+
 
 #### **Channel & Video Setup Logic:**
 *   The system handles both initial setup and reset scenarios:
@@ -111,7 +113,7 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Fallback Logic:** If no transcript is available in any language, the transcript status is marked as 'unavailable'. If translation fails, the system logs the error but stores the original language transcript, allowing manual review or retry with different translation parameters.
 *   **Comments:** Fetched via asynchronous requests to the YouTube Data API v3. The API allows 10,000 units/day quota, with comment fetching costing 1 unit per request (100 max comments per request). A configurable `max_concurrency` setting in `config.py` controls the rate of concurrent comment requests to respect a 10 RPS recommended limit. The system handles API pagination to retrieve all available comments. Comment data is stored directly in the database using `aiosqlite`.
 
-#### **AI Processing Pipeline (3-Stage, Fully Decoupled):**
+#### **3-Stage AI Processing Pipeline:**
 *   The entire pipeline follows the flow: Raw Data → DB → Stage 1 → DB → Stage 2 → DB → Stage 3 → DB → User Queries. The 3-stage AI pipeline extracts and summarizes raw data into topic-based summaries, then refines and atomizes this content into two distinct data types: `quantitative` (numerical insights) and `qualitative` (descriptive insights), and finally generates embeddings for semantic search. Each stage runs independently on the previous level of data and saves its output to the database. Rate limiting is controlled by three distinct 'max concurrent requests' values in `config.py` to independently control asynchronous request limits for each Gemini model (stages 1, 2, 3).
     *   **Stage 1 (Extract & Summarize):** **Input:** Raw text from both transcript and all comments for a video retrieved from the database, processed together in a single request. **Process:** A cost-effective model (e.g., Gemini Flash) is prompted to extract all valuable data and organize it into paragraph summaries of each major topic discussed, clearly identifying whether each topic originated from the transcript or a comment. **Output:** Multiple topic-based paragraph blurbs stored in the `TopicSummaries` table with source attribution. **Status Update:** `stage_1_status` set to 'complete' with ✅ log entry.
     *   **Stage 2 (Refine & Atomize):** **Input:** All topic blurbs for a video (both transcript and comment-derived) from the `TopicSummaries` table. **Process:** A powerful model (e.g., Gemini Pro) processes the entire video's blurbs at once to: 1) filter out vague or low-value content, and 2) break down the remaining valuable content into atomic records classified as either `quantitative` or `qualitative`. Source attribution is preserved through foreign key relationships. **Output:** Atomic insights stored in the `AtomicInsights` table with foreign key references to their source topic summaries. **Status Update:** `stage_2_status` set to 'complete' with ✅ log entry.
@@ -175,7 +177,7 @@ A Python-based tool to download video transcripts and comments from YouTube chan
         *   `view_count` (INTEGER) --- *The view count at the time of metadata fetching.*
         *   `like_count` (INTEGER) --- *The like count at the time of metadata fetching.*
 
-    *   **`VideoProcessingStatus` Table**
+    *   **`Status` Table**
         *   `video_id` (TEXT, Primary Key, Foreign Key referencing `Videos`) --- *Links to the `Videos` table.*
         *   `transcript_status` (TEXT) --- *e.g., 'pending', 'downloaded', 'unavailable'.*
         *   `comments_status` (TEXT) --- *e.g., 'pending', 'downloaded', 'disabled'.*
