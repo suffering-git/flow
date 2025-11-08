@@ -8,6 +8,8 @@ Uses Gemini Pro for powerful analysis.
 import asyncio
 import json
 from typing import Any
+from datetime import datetime
+from pathlib import Path
 
 import config
 from database.db_manager import DatabaseManager
@@ -16,6 +18,7 @@ from processors.timestamp_parser import TimestampParser
 from utils.gemini_client import GeminiClient
 from utils.logger import get_logger
 from utils.rate_limiter import RateLimiter
+from utils.signal_handler import shutdown_requested, pause_requested
 
 logger = get_logger(__name__)
 
@@ -51,13 +54,34 @@ class Stage2Processor:
         """
         logger.info("🔄 Starting Stage 2 processing")
 
-        # TODO: Implement batch processing
-        # 1. Get all videos ready for Stage 2
-        # 2. Create tasks for concurrent processing
-        # 3. Use asyncio.gather() with semaphore
-        # 4. Handle pause/shutdown signals
+        # Get all videos ready for Stage 2
+        ready_videos = self.db_manager.fetchall(
+            """
+            SELECT video_id FROM Status
+            WHERE stage_1_status = 'complete'
+              AND stage_2_status = 'pending'
+            """
+        )
 
-        pass
+        if not ready_videos:
+            logger.info("✅ No videos ready for Stage 2")
+            return
+
+        video_ids = [row['video_id'] for row in ready_videos]
+        logger.info(f"🔄 Processing {len(video_ids)} videos through Stage 2")
+
+        # Create tasks for concurrent processing
+        tasks = []
+        for video_id in video_ids:
+            # Check for shutdown/pause signals
+            if shutdown_requested.is_set() or pause_requested.is_set():
+                break
+            tasks.append(self.process_video(video_id))
+
+        # Execute concurrently
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info("✅ Stage 2 processing completed")
 
     async def process_video(self, video_id: str) -> None:
         """
@@ -70,20 +94,73 @@ class Stage2Processor:
             try:
                 logger.debug(f"🔄 Stage 2 processing: {video_id}")
 
-                # TODO: Implement video processing
-                # 1. Fetch compressed data from database
-                # 2. Build prompt with compressed transcript and comments
-                # 3. Call Gemini API
-                # 4. Validate response with Pydantic
-                # 5. Parse inline timestamp syntax
-                # 6. Flatten nested structure and store in database
-                # 7. Update status to 'complete'
+                # Fetch compressed data
+                compressed_row = self.db_manager.fetchone(
+                    """
+                    SELECT compressed_transcript, compressed_comments_json
+                    FROM CompressedData
+                    WHERE video_id = ?
+                    """,
+                    (video_id,)
+                )
 
-                pass
+                if not compressed_row:
+                    logger.warning(f"🟡 No compressed data for {video_id}")
+                    return
+
+                compressed_transcript = compressed_row['compressed_transcript']
+                compressed_comments_json = compressed_row['compressed_comments_json']
+
+                # Parse comments JSON
+                compressed_comments = json.loads(compressed_comments_json) if compressed_comments_json else []
+
+                # Build prompt
+                prompt = self._build_prompt(compressed_transcript, compressed_comments)
+
+                # Call Gemini API
+                response = await self.gemini_client.generate_content(prompt)
+
+                # Track usage
+                await self.rate_limiter.track_request(
+                    response['input_tokens'],
+                    response['output_tokens']
+                )
+
+                # Validate and parse response
+                validated_output = self._validate_and_parse_response(
+                    response['response_text']
+                )
+
+                # Process and store topics with timestamp parsing
+                self._process_and_store_topics(video_id, validated_output)
+
+                # Update status
+                with self.db_manager.transaction() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET stage_2_status = 'complete',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (datetime.now(), video_id)
+                    )
+
+                logger.debug(f"✅ Stage 2 completed: {video_id}")
 
             except Exception as e:
                 logger.error(f"❌ Stage 2 failed for {video_id}: {e}")
-                # TODO: Update status to 'failed'
+                # Update status to failed
+                with self.db_manager.transaction() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET stage_2_status = 'failed',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (datetime.now(), video_id)
+                    )
 
     def _build_prompt(
         self,
@@ -100,12 +177,35 @@ class Stage2Processor:
         Returns:
             Complete prompt string.
         """
-        # TODO: Implement prompt construction
-        # 1. Load Stage 2 prompt template from prompts/stage2_prompt.txt
-        # 2. Insert compressed data
-        # 3. Return formatted prompt
+        # Load prompt template
+        prompt_path = Path("prompts/stage2_prompt.txt")
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            template = f.read()
 
-        pass
+        # Build data section
+        data_parts = []
+
+        # Add compressed transcript
+        if compressed_transcript:
+            data_parts.append("=== COMPRESSED TRANSCRIPT ===")
+            data_parts.append(compressed_transcript)
+            data_parts.append("")
+
+        # Add compressed comments
+        if compressed_comments:
+            data_parts.append("=== COMPRESSED COMMENTS ===")
+            for comment in compressed_comments:
+                data_parts.append(
+                    f"Comment ID: {comment['comment_id']}\n{comment['compressed_text']}\n"
+                )
+            data_parts.append("")
+
+        data_section = "\n".join(data_parts)
+
+        # Combine template and data
+        full_prompt = f"{template}\n\n{data_section}"
+
+        return full_prompt
 
     def _validate_and_parse_response(self, response: str) -> Stage2Output:
         """
@@ -120,12 +220,13 @@ class Stage2Processor:
         Raises:
             ValidationError: If response doesn't match expected structure.
         """
-        # TODO: Implement validation
-        # 1. Parse JSON
-        # 2. Validate with Pydantic Stage2Output model
-        # 3. Return validated object
+        # Parse JSON
+        data = json.loads(response)
 
-        pass
+        # Validate with Pydantic model
+        validated = Stage2Output(**data)
+
+        return validated
 
     def _process_and_store_topics(
         self,
@@ -141,15 +242,54 @@ class Stage2Processor:
             video_id: YouTube video ID.
             stage2_output: Validated Stage 2 output.
         """
-        # TODO: Implement topic storage
-        # For each topic:
-        # 1. Parse inline timestamp syntax from summary_text
-        # 2. Extract clean text and timestamp mappings
-        # 3. Store in TopicSummaries with parsed data
-        # 4. For each nested atomic insight:
-        #    a. Parse inline timestamp syntax from insight_text
-        #    b. Inherit timestamp mappings from parent topic
-        #    c. Store in AtomicInsights
-        # Use transaction for atomicity
+        with self.db_manager.transaction() as cursor:
+            for topic in stage2_output.topics:
+                # Parse timestamp syntax from summary text
+                parsed_summary = self.timestamp_parser.parse_text_with_timestamps(
+                    topic.summary_text
+                )
 
-        pass
+                # Store topic summary
+                cursor.execute(
+                    """
+                    INSERT INTO TopicSummaries
+                    (video_id, topic_title, summary_text, summary_timestamps,
+                     source_type, confidence_score, comment_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        video_id,
+                        topic.topic_title,
+                        parsed_summary['full_text'],
+                        json.dumps(parsed_summary['timestamped_segments']),
+                        topic.source_type,
+                        topic.confidence_score,
+                        topic.comment_id
+                    )
+                )
+
+                # Get the topic_summary_id
+                topic_summary_id = cursor.lastrowid
+
+                # Store nested atomic insights
+                for insight in topic.atomic_insights:
+                    # Parse timestamp syntax from insight text
+                    parsed_insight = self.timestamp_parser.parse_text_with_timestamps(
+                        insight.insight_text
+                    )
+
+                    cursor.execute(
+                        """
+                        INSERT INTO AtomicInsights
+                        (topic_summary_id, insight_type, insight_text,
+                         insight_timestamps, confidence_score)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            topic_summary_id,
+                            insight.insight_type,
+                            parsed_insight['full_text'],
+                            json.dumps(parsed_insight['timestamped_segments']),
+                            insight.confidence_score
+                        )
+                    )

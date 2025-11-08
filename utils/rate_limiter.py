@@ -67,14 +67,39 @@ class RateLimiter:
             input_tokens: Number of input tokens used.
             output_tokens: Number of output tokens generated.
         """
-        # TODO: Implement tracking logic
-        # 1. Update counters
-        # 2. Calculate cost
-        # 3. Check if current minute has passed, reset if needed
-        # 4. Check against rate limits and log warnings
-        # 5. Log periodic summaries based on config intervals
+        # Calculate cost for this request
+        cost = calculate_cost(self.model_code, input_tokens, output_tokens)
 
-        pass
+        # Update total counters
+        self.request_count += 1
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_cost += cost
+
+        # Update tracking for logging
+        self.requests_since_log += 1
+        self.tokens_since_log += input_tokens + output_tokens
+
+        # Check if we've entered a new minute
+        now = datetime.now()
+        if now - self.minute_start > timedelta(minutes=1):
+            # Reset per-minute counters
+            self.current_minute_requests = 0
+            self.current_minute_tokens = 0
+            self.minute_start = now
+
+        # Update current minute counters
+        self.current_minute_requests += 1
+        self.current_minute_tokens += input_tokens + output_tokens
+
+        # Check rate limits and log warnings if needed
+        self._check_rate_limits()
+
+        # Log periodic summaries
+        if self.requests_since_log >= config.LOG_EVERY_N_REQUESTS:
+            self._log_usage_summary()
+            self.requests_since_log = 0
+            self.tokens_since_log = 0
 
     def _check_rate_limits(self) -> None:
         """
@@ -82,12 +107,25 @@ class RateLimiter:
 
         Logs warnings when approaching thresholds.
         """
-        # TODO: Implement limit checking
-        # Calculate percentage of RPM and TPM used
-        # Compare against config.RATE_LIMIT_WARNING_THRESHOLDS
-        # Log warnings at 50%, 75%, 90% thresholds
+        # Calculate percentage of limits used
+        rpm_percent = (self.current_minute_requests / self.limits.rpm) * 100
+        tpm_percent = (self.current_minute_tokens / self.limits.tpm) * 100
 
-        pass
+        # Check against warning thresholds
+        for threshold in config.RATE_LIMIT_WARNING_THRESHOLDS:
+            # Check RPM threshold
+            if rpm_percent >= threshold and rpm_percent < threshold + 10:
+                logger.warning(
+                    f"⚠️  RPM at {rpm_percent:.1f}% "
+                    f"({self.current_minute_requests}/{self.limits.rpm})"
+                )
+
+            # Check TPM threshold
+            if tpm_percent >= threshold and tpm_percent < threshold + 10:
+                logger.warning(
+                    f"⚠️  TPM at {tpm_percent:.1f}% "
+                    f"({self.current_minute_tokens:,}/{self.limits.tpm:,})"
+                )
 
     def _log_usage_summary(self) -> None:
         """

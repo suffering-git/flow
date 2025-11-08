@@ -29,6 +29,7 @@ DATABASE_PATH: str = "data/youtube_data.db"
 # List of YouTube channel IDs to process
 CHANNEL_IDS: list[str] = [
     # "UC295-Dw_tDNtZXFeAPAW6Aw",  # Example channel ID
+    "UCufnDvlHF9NHzEL4c3ECZUA"
 ]
 
 # =============================================================================

@@ -54,14 +54,36 @@ class GeminiClient:
             - input_tokens: Number of input tokens
             - output_tokens: Number of output tokens
         """
-        # TODO: Implement Gemini API call
-        # 1. Configure generation with JSON response type
-        # 2. Call model.generate_content()
-        # 3. Extract response text
-        # 4. Get token counts from usage_metadata
-        # 5. Return structured response
+        try:
+            # Configure generation with response MIME type
+            generation_config = genai.GenerationConfig(
+                response_mime_type=response_mime_type
+            )
 
-        pass
+            # Generate content
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=generation_config
+            )
+
+            # Extract token counts from usage metadata
+            input_tokens = response.usage_metadata.prompt_token_count
+            output_tokens = response.usage_metadata.candidates_token_count
+
+            logger.debug(
+                f"🤖 Generated {output_tokens} tokens "
+                f"(input: {input_tokens})"
+            )
+
+            return {
+                "response_text": response.text,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Gemini API error: {e}")
+            raise
 
     async def generate_embedding(self, text: str) -> list[float]:
         """
@@ -73,9 +95,18 @@ class GeminiClient:
         Returns:
             Embedding vector as list of floats.
         """
-        # TODO: Implement embedding generation
-        # 1. Use genai.embed_content() with embedding model
-        # 2. Specify dimension size from config
-        # 3. Return embedding vector
+        try:
+            # Generate embedding using Gemini embedding model
+            result = genai.embed_content(
+                model=self.model_code,
+                content=text,
+                task_type="retrieval_document"
+            )
 
-        pass
+            logger.debug(f"🔢 Generated embedding for text ({len(text)} chars)")
+
+            return result['embedding']
+
+        except Exception as e:
+            logger.error(f"❌ Embedding generation error: {e}")
+            raise

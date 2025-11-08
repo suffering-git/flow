@@ -8,6 +8,8 @@ Uses Gemini Flash-Lite for cost-effective compression.
 import asyncio
 import json
 from typing import Optional
+from datetime import datetime
+from pathlib import Path
 
 import config
 from database.db_manager import DatabaseManager
@@ -15,6 +17,7 @@ from models.stage1_models import Stage1Output
 from utils.gemini_client import GeminiClient
 from utils.logger import get_logger
 from utils.rate_limiter import RateLimiter
+from utils.signal_handler import shutdown_requested, pause_requested
 
 logger = get_logger(__name__)
 
@@ -50,13 +53,35 @@ class Stage1Processor:
         """
         logger.info("🔄 Starting Stage 1 processing")
 
-        # TODO: Implement batch processing
-        # 1. Get all videos ready for Stage 1
-        # 2. Create tasks for concurrent processing
-        # 3. Use asyncio.gather() with semaphore
-        # 4. Handle pause/shutdown signals
+        # Get all videos ready for Stage 1
+        ready_videos = self.db_manager.fetchall(
+            """
+            SELECT video_id FROM Status
+            WHERE (transcript_status IN ('downloaded', 'unavailable'))
+              AND (comments_status IN ('downloaded', 'disabled'))
+              AND stage_1_status = 'pending'
+            """
+        )
 
-        pass
+        if not ready_videos:
+            logger.info("✅ No videos ready for Stage 1")
+            return
+
+        video_ids = [row['video_id'] for row in ready_videos]
+        logger.info(f"🔄 Processing {len(video_ids)} videos through Stage 1")
+
+        # Create tasks for concurrent processing
+        tasks = []
+        for video_id in video_ids:
+            # Check for shutdown/pause signals
+            if shutdown_requested.is_set() or pause_requested.is_set():
+                break
+            tasks.append(self.process_video(video_id))
+
+        # Execute concurrently
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info("✅ Stage 1 processing completed")
 
     async def process_video(self, video_id: str) -> None:
         """
@@ -69,19 +94,91 @@ class Stage1Processor:
             try:
                 logger.debug(f"🔄 Stage 1 processing: {video_id}")
 
-                # TODO: Implement video processing
-                # 1. Fetch raw data from database
-                # 2. Build prompt with transcript and comments
-                # 3. Call Gemini API
-                # 4. Validate response with Pydantic
-                # 5. Store compressed data with transaction
-                # 6. Update status to 'complete'
+                # Fetch transcript (if available)
+                transcript_row = self.db_manager.fetchone(
+                    """
+                    SELECT transcript_text FROM RawTranscripts
+                    WHERE video_id = ?
+                    """,
+                    (video_id,)
+                )
+                transcript_text = transcript_row['transcript_text'] if transcript_row else None
 
-                pass
+                # Fetch comments (if available)
+                comment_rows = self.db_manager.fetchall(
+                    """
+                    SELECT comment_id, comment_text FROM RawComments
+                    WHERE video_id = ?
+                    ORDER BY published_at DESC
+                    """,
+                    (video_id,)
+                )
+                comments = [
+                    {
+                        'comment_id': row['comment_id'],
+                        'comment_text': row['comment_text']
+                    }
+                    for row in comment_rows
+                ]
+
+                # Build prompt
+                prompt = self._build_prompt(transcript_text, comments)
+
+                # Call Gemini API
+                response = await self.gemini_client.generate_content(prompt)
+
+                # Track usage
+                await self.rate_limiter.track_request(
+                    response['input_tokens'],
+                    response['output_tokens']
+                )
+
+                # Validate and parse response
+                validated_output = self._validate_and_parse_response(
+                    response['response_text']
+                )
+
+                # Store compressed data
+                with self.db_manager.transaction() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO CompressedData
+                        (video_id, compressed_transcript, compressed_comments_json)
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            video_id,
+                            validated_output.compressed_transcript,
+                            json.dumps([c.dict() for c in validated_output.compressed_comments])
+                        )
+                    )
+
+                    # Update status
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET stage_1_status = 'complete',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (datetime.now(), video_id)
+                    )
+
+                logger.debug(f"✅ Stage 1 completed: {video_id}")
 
             except Exception as e:
                 logger.error(f"❌ Stage 1 failed for {video_id}: {e}")
-                # TODO: Update status to 'failed'
+                # Update status to failed
+                with self.db_manager.transaction() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET stage_1_status = 'failed',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (datetime.now(), video_id)
+                    )
 
     def _build_prompt(
         self,
@@ -98,12 +195,35 @@ class Stage1Processor:
         Returns:
             Complete prompt string.
         """
-        # TODO: Implement prompt construction
-        # 1. Load Stage 1 prompt template from prompts/stage1_prompt.txt
-        # 2. Insert transcript and comments data
-        # 3. Return formatted prompt
+        # Load prompt template
+        prompt_path = Path("prompts/stage1_prompt.txt")
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            template = f.read()
 
-        pass
+        # Build data section
+        data_parts = []
+
+        # Add transcript if available
+        if transcript_text:
+            data_parts.append("=== TRANSCRIPT ===")
+            data_parts.append(transcript_text)
+            data_parts.append("")
+
+        # Add comments if available
+        if comments:
+            data_parts.append("=== COMMENTS ===")
+            for comment in comments:
+                data_parts.append(
+                    f"Comment ID: {comment['comment_id']}\n{comment['comment_text']}\n"
+                )
+            data_parts.append("")
+
+        data_section = "\n".join(data_parts)
+
+        # Combine template and data
+        full_prompt = f"{template}\n\n{data_section}"
+
+        return full_prompt
 
     def _validate_and_parse_response(self, response: str) -> Stage1Output:
         """
@@ -118,9 +238,10 @@ class Stage1Processor:
         Raises:
             ValidationError: If response doesn't match expected structure.
         """
-        # TODO: Implement validation
-        # 1. Parse JSON
-        # 2. Validate with Pydantic Stage1Output model
-        # 3. Return validated object
+        # Parse JSON
+        data = json.loads(response)
 
-        pass
+        # Validate with Pydantic model
+        validated = Stage1Output(**data)
+
+        return validated

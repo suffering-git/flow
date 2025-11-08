@@ -38,14 +38,32 @@ class TranslationHelper:
             - If translated: (translated_text, detected_lang, True)
             - If detection/translation fails: (original_text, "unknown", False)
         """
-        # TODO: Implement detection and translation
-        # 1. Use langdetect.detect() to identify language
-        # 2. If not English, translate using googletrans
-        # 3. Handle LangDetectException gracefully
-        # 4. Log errors but don't fail
-        # 5. Return tuple with results
+        # Detect language
+        detected_lang = self.detect_language(text)
 
-        pass
+        # If detection failed, return original text
+        if detected_lang is None:
+            logger.debug("🟡 Could not detect language, keeping original text")
+            return (text, "unknown", False)
+
+        # If already English, no translation needed
+        if detected_lang == "en":
+            return (text, "en", False)
+
+        # Translate to English
+        translated = self.translate_to_english(text, detected_lang)
+
+        # If translation failed, return original text
+        if translated is None:
+            logger.debug(
+                f"🟡 Translation from {detected_lang} failed, "
+                f"keeping original text"
+            )
+            return (text, detected_lang, False)
+
+        # Successfully translated
+        logger.debug(f"🌐 Translated from {detected_lang} to English")
+        return (translated, detected_lang, True)
 
     def detect_language(self, text: str) -> Optional[str]:
         """

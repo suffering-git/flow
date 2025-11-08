@@ -44,11 +44,22 @@ def setup_signal_handlers() -> None:
     """
     Setup signal handlers for graceful shutdown and pause.
     """
-    # TODO: Implement signal registration
-    # signal.signal(signal.SIGTERM, handle_shutdown)
-    # signal.signal(signal.SIGUSR1, handle_pause)  # Not available on Windows
+    import platform
 
-    # Note: SIGUSR1 is not available on Windows
-    # May need platform-specific handling or alternative approach
+    # Always register SIGTERM for shutdown
+    signal.signal(signal.SIGTERM, handle_shutdown)
 
-    logger.info("✅ Signal handlers configured")
+    # SIGINT (Ctrl+C) for shutdown as well
+    signal.signal(signal.SIGINT, handle_shutdown)
+
+    # Platform-specific pause signal
+    # SIGUSR1 only available on Unix-like systems
+    if platform.system() != 'Windows':
+        try:
+            signal.signal(signal.SIGUSR1, handle_pause)
+            logger.info("✅ Signal handlers configured (SIGTERM, SIGINT, SIGUSR1)")
+        except AttributeError:
+            logger.info("✅ Signal handlers configured (SIGTERM, SIGINT)")
+    else:
+        logger.info("✅ Signal handlers configured (SIGTERM, SIGINT)")
+        logger.debug("ℹ️  SIGUSR1 not available on Windows")

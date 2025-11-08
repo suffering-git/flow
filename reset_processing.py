@@ -60,9 +60,7 @@ def reset_database() -> None:
     logger.info("\n🔄 Executing database reset...")
 
     db_manager = DatabaseManager(config.DATABASE_PATH)
-
-    # TODO: Implement reset logic
-    # db_manager.reset_processing_data(reset_compressed=config.RESET_COMPRESSED_DATA)
+    db_manager.reset_processing_data(reset_compressed=config.RESET_COMPRESSED_DATA)
 
     logger.info("✅ Database reset completed successfully")
 

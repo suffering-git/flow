@@ -53,21 +53,21 @@ async def main() -> None:
     db_manager = DatabaseManager(config.DATABASE_PATH)
     db_manager.initialize_database()
 
-    # TODO: Implement channel & video discovery
-    # channel_fetcher = ChannelFetcher(db_manager)
-    # await channel_fetcher.discover_channels(config.CHANNEL_IDS)
+    # Stage 1: Channel & video discovery
+    channel_fetcher = ChannelFetcher(db_manager)
+    await channel_fetcher.discover_channels(config.CHANNEL_IDS)
 
     if shutdown_requested.is_set():
         logger.info("⏸️ Shutdown requested during channel discovery")
         return
 
-    # TODO: Implement transcript & comment fetching
-    # transcript_fetcher = TranscriptFetcher(db_manager)
-    # comment_fetcher = CommentFetcher(db_manager)
-    # await asyncio.gather(
-    #     transcript_fetcher.fetch_all_transcripts(),
-    #     comment_fetcher.fetch_all_comments()
-    # )
+    # Stage 2: Transcript & comment fetching (concurrent)
+    transcript_fetcher = TranscriptFetcher(db_manager)
+    comment_fetcher = CommentFetcher(db_manager)
+    await asyncio.gather(
+        transcript_fetcher.fetch_all_transcripts(),
+        comment_fetcher.fetch_all_comments()
+    )
 
     if config.STOP_AFTER_STAGE == "downloads":
         logger.info("🎯 Stopped after downloads as configured")
@@ -77,9 +77,9 @@ async def main() -> None:
         logger.info("⏸️ Shutdown requested after downloads")
         return
 
-    # TODO: Implement Stage 1 processing
-    # stage1 = Stage1Processor(db_manager)
-    # await stage1.process_all_videos()
+    # Stage 3: Data compression (Stage 1)
+    stage1 = Stage1Processor(db_manager)
+    await stage1.process_all_videos()
 
     if config.STOP_AFTER_STAGE == "stage_1":
         logger.info("🎯 Stopped after Stage 1 as configured")
@@ -89,9 +89,9 @@ async def main() -> None:
         logger.info("⏸️ Shutdown requested after Stage 1")
         return
 
-    # TODO: Implement Stage 2 processing
-    # stage2 = Stage2Processor(db_manager)
-    # await stage2.process_all_videos()
+    # Stage 4: Topic extraction & atomic insights (Stage 2)
+    stage2 = Stage2Processor(db_manager)
+    await stage2.process_all_videos()
 
     if config.STOP_AFTER_STAGE == "stage_2":
         logger.info("🎯 Stopped after Stage 2 as configured")
@@ -101,9 +101,9 @@ async def main() -> None:
         logger.info("⏸️ Shutdown requested after Stage 2")
         return
 
-    # TODO: Implement Stage 3 processing
-    # stage3 = Stage3Processor(db_manager)
-    # await stage3.generate_all_embeddings()
+    # Stage 5: Embedding generation (Stage 3)
+    stage3 = Stage3Processor(db_manager)
+    await stage3.generate_all_embeddings()
 
     logger.info("✅ Pipeline completed successfully")
 

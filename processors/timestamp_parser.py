@@ -34,22 +34,14 @@ class TimestampParser:
             - full_text: Clean text without syntax
             - timestamped_segments: List of {"text": str, "timestamps": [str]}
         """
-        # TODO: Implement parsing
-        # 1. Use regex to find all {text [timestamps]} matches
-        # 2. Extract clean text by removing syntax
-        # 3. Build list of segments with text and timestamp arrays
-        # 4. Return structured data
+        # Extract both clean text and segments
+        clean_text = self.extract_clean_text(text_with_syntax)
+        segments = self.extract_timestamp_segments(text_with_syntax)
 
-        # Example return:
-        # {
-        #     "full_text": "Installing Wi-Fi controlled timers for automated irrigation...",
-        #     "timestamped_segments": [
-        #         {"text": "Installing Wi-Fi controlled timers", "timestamps": ["00:04:34", "00:06:23"]},
-        #         {"text": "automated irrigation", "timestamps": ["00:01:03"]}
-        #     ]
-        # }
-
-        pass
+        return {
+            "full_text": clean_text,
+            "timestamped_segments": segments
+        }
 
     def extract_clean_text(self, text_with_syntax: str) -> str:
         """
@@ -61,9 +53,10 @@ class TimestampParser:
         Returns:
             Clean text string.
         """
-        # TODO: Implement text extraction
-        # Remove all {text [timestamps]} syntax, keeping only the text portions
-        pass
+        # Replace {text [timestamps]} with just the text portion
+        # This keeps the text but removes the curly braces and timestamps
+        clean_text = self.PATTERN.sub(r'\1', text_with_syntax)
+        return clean_text.strip()
 
     def extract_timestamp_segments(
         self,
@@ -78,9 +71,22 @@ class TimestampParser:
         Returns:
             List of segments: [{"text": str, "timestamps": [str]}]
         """
-        # TODO: Implement segment extraction
-        # Find all matches and build segment list
-        pass
+        segments = []
+
+        # Find all matches of {text [timestamps]}
+        for match in self.PATTERN.finditer(text_with_syntax):
+            text_portion = match.group(1).strip()
+            timestamp_str = match.group(2).strip()
+
+            # Parse pipe-separated timestamps
+            timestamps = self._parse_timestamps(timestamp_str)
+
+            segments.append({
+                "text": text_portion,
+                "timestamps": timestamps
+            })
+
+        return segments
 
     def _parse_timestamps(self, timestamp_str: str) -> list[str]:
         """

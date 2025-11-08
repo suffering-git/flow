@@ -49,10 +49,30 @@ class QueryUtils:
         Returns:
             List of matching insights with basic metadata.
         """
-        # TODO: Implement FTS5 search
-        # Use db_manager.search_insights_fts()
         logger.info(f"🔍 Text search: '{query}'")
-        pass
+
+        results = self.db_manager.fetchall(
+            """
+            SELECT
+                ai.insight_id,
+                ai.insight_text,
+                ai.insight_type,
+                ai.confidence_score,
+                ts.topic_title,
+                v.video_title,
+                v.video_id
+            FROM insights_fts fts
+            JOIN AtomicInsights ai ON fts.rowid = ai.insight_id
+            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN Videos v ON ts.video_id = v.video_id
+            WHERE insights_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (query, limit)
+        )
+
+        return [dict(row) for row in results]
 
     async def search_semantic(
         self,
@@ -71,14 +91,58 @@ class QueryUtils:
         Returns:
             List of matching insights with similarity scores.
         """
-        # TODO: Implement vector search
-        # 1. Generate embedding for query using embedding_client
-        # 2. Query sqlite-vec for similar vectors
-        # 3. Filter by similarity threshold
-        # 4. Return top results
-
         logger.info(f"🔍 Semantic search: '{query}'")
-        pass
+
+        # Generate embedding for query
+        query_embedding = await self.embedding_client.generate_embedding(query)
+
+        # Note: This is a simplified implementation
+        # For production, you'd use sqlite-vec for efficient vector search
+        # Here we're using a basic approach for demonstration
+
+        # Get all insights with embeddings
+        all_insights = self.db_manager.fetchall(
+            """
+            SELECT
+                ai.insight_id,
+                ai.insight_text,
+                ai.insight_type,
+                ai.embedding,
+                ts.topic_title,
+                v.video_title,
+                v.video_id
+            FROM AtomicInsights ai
+            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN Videos v ON ts.video_id = v.video_id
+            WHERE ai.embedding IS NOT NULL
+            """
+        )
+
+        # Calculate similarity scores
+        # (In production, use sqlite-vec for efficient vector search)
+        results_with_scores = []
+        for row in all_insights:
+            # Deserialize embedding
+            import struct
+            embedding_bytes = row['embedding']
+            num_floats = len(embedding_bytes) // 4
+            embedding = list(struct.unpack(f'<{num_floats}f', embedding_bytes))
+
+            # Calculate cosine similarity
+            dot_product = sum(a * b for a, b in zip(query_embedding, embedding))
+            query_norm = sum(a * a for a in query_embedding) ** 0.5
+            embedding_norm = sum(b * b for b in embedding) ** 0.5
+            similarity = dot_product / (query_norm * embedding_norm)
+
+            if similarity >= similarity_threshold:
+                result = dict(row)
+                result['similarity'] = similarity
+                del result['embedding']  # Don't return raw embedding
+                results_with_scores.append(result)
+
+        # Sort by similarity and limit
+        results_with_scores.sort(key=lambda x: x['similarity'], reverse=True)
+        return results_with_scores[:limit]
 
     def get_insight_details(self, insight_id: int) -> dict[str, Any]:
         """
@@ -96,13 +160,54 @@ class QueryUtils:
         Returns:
             Dictionary with complete insight context.
         """
-        # TODO: Implement detail retrieval
-        # Use db_manager.get_insight_with_context()
-        # Parse timestamp JSON
-        # Generate YouTube URLs
-
         logger.debug(f"📄 Fetching insight details: {insight_id}")
-        pass
+
+        # Get full context
+        result = self.db_manager.fetchone(
+            """
+            SELECT
+                ai.insight_id,
+                ai.insight_text,
+                ai.insight_timestamps,
+                ai.insight_type,
+                ai.confidence_score AS insight_confidence,
+                ts.topic_title,
+                ts.summary_text,
+                ts.summary_timestamps,
+                ts.confidence_score AS topic_confidence,
+                v.video_id,
+                v.video_title,
+                v.published_date,
+                c.channel_name
+            FROM AtomicInsights ai
+            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN Videos v ON ts.video_id = v.video_id
+            JOIN Channels c ON v.channel_id = c.channel_id
+            WHERE ai.insight_id = ?
+            """,
+            (insight_id,)
+        )
+
+        if not result:
+            return None
+
+        # Convert to dict
+        details = dict(result)
+
+        # Parse timestamp JSON
+        import json
+        details['insight_timestamps'] = json.loads(details['insight_timestamps'])
+        details['summary_timestamps'] = json.loads(details['summary_timestamps'])
+
+        # Generate YouTube links for insight timestamps
+        video_id = details['video_id']
+        for segment in details['insight_timestamps'].get('timestamped_segments', []):
+            segment['youtube_links'] = [
+                self.generate_youtube_link(video_id, ts)
+                for ts in segment['timestamps']
+            ]
+
+        return details
 
     def browse_insights(
         self,
@@ -121,12 +226,39 @@ class QueryUtils:
         Returns:
             List of insights (text only for quick browsing).
         """
-        # TODO: Implement browse functionality
-        # Query AtomicInsights table with pagination
-        # Return: insight_id, insight_text, insight_type
-
         logger.debug(f"📖 Browsing insights: offset={offset}, limit={limit}")
-        pass
+
+        if insight_type:
+            results = self.db_manager.fetchall(
+                """
+                SELECT
+                    insight_id,
+                    insight_text,
+                    insight_type,
+                    confidence_score
+                FROM AtomicInsights
+                WHERE insight_type = ?
+                ORDER BY insight_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (insight_type, limit, offset)
+            )
+        else:
+            results = self.db_manager.fetchall(
+                """
+                SELECT
+                    insight_id,
+                    insight_text,
+                    insight_type,
+                    confidence_score
+                FROM AtomicInsights
+                ORDER BY insight_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset)
+            )
+
+        return [dict(row) for row in results]
 
     def generate_youtube_link(
         self,
@@ -143,11 +275,18 @@ class QueryUtils:
         Returns:
             YouTube URL with time parameter.
         """
-        # TODO: Implement URL generation
         # Parse HH:MM:SS to seconds
-        # Return: f"https://youtube.com/watch?v={video_id}&t={seconds}s"
+        parts = timestamp_str.split(':')
+        if len(parts) == 3:
+            hours, minutes, seconds = map(int, parts)
+            total_seconds = hours * 3600 + minutes * 60 + seconds
+        elif len(parts) == 2:
+            minutes, seconds = map(int, parts)
+            total_seconds = minutes * 60 + seconds
+        else:
+            total_seconds = int(parts[0])
 
-        pass
+        return f"https://youtube.com/watch?v={video_id}&t={total_seconds}s"
 
     def get_insights_by_video(self, video_id: str) -> list[dict[str, Any]]:
         """
@@ -159,12 +298,25 @@ class QueryUtils:
         Returns:
             List of all insights from the video.
         """
-        # TODO: Implement video-based query
-        # Join AtomicInsights -> TopicSummaries -> Videos
-        # Return all insights for video
-
         logger.debug(f"📹 Getting insights for video: {video_id}")
-        pass
+
+        results = self.db_manager.fetchall(
+            """
+            SELECT
+                ai.insight_id,
+                ai.insight_text,
+                ai.insight_type,
+                ai.confidence_score,
+                ts.topic_title
+            FROM AtomicInsights ai
+            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            WHERE ts.video_id = ?
+            ORDER BY ai.insight_id
+            """,
+            (video_id,)
+        )
+
+        return [dict(row) for row in results]
 
     def get_topics_by_video(self, video_id: str) -> list[dict[str, Any]]:
         """
@@ -176,11 +328,24 @@ class QueryUtils:
         Returns:
             List of topic summaries.
         """
-        # TODO: Implement topic retrieval
-        # Query TopicSummaries table filtered by video_id
-
         logger.debug(f"📹 Getting topics for video: {video_id}")
-        pass
+
+        results = self.db_manager.fetchall(
+            """
+            SELECT
+                topic_summary_id,
+                topic_title,
+                summary_text,
+                source_type,
+                confidence_score
+            FROM TopicSummaries
+            WHERE video_id = ?
+            ORDER BY topic_summary_id
+            """,
+            (video_id,)
+        )
+
+        return [dict(row) for row in results]
 
     def close(self) -> None:
         """Close database connection."""
