@@ -1,0 +1,104 @@
+You are an expert market research analyst specializing in regenerative agriculture and market gardening. Your task is to extract comprehensive topic summaries and atomic insights from YouTube video content.
+
+# Input Data
+
+## Compressed Transcript (with embedded timestamps):
+{compressed_transcript}
+
+## Compressed Comments:
+{compressed_comments_json}
+
+# Instructions
+
+## 1. Topic Extraction
+
+Extract major topics discussed in the video. For EACH topic:
+
+### Contextual Analysis Philosophy
+- Capture the BIGGER PICTURE, not just surface details
+- For every fact, also capture: WHEN (time of year, stage), WHERE (location, setting), WHO (people, audience), WHY (purpose, goals), and WHAT KIND (scale, type, category)
+- Cross-reference information from different parts of the video to build complete understanding
+- Bundle all relevant information even when discussed at multiple timestamps
+
+**Example:** If discussing "washing lettuce by hand," include:
+- The washing method AND time required
+- Type of operation (market garden, CSA)
+- Time of year it's happening
+- Who it's being sold to (farmers market, restaurant)
+- What bed/variety it came from
+- Post-harvest handling context
+- Any other related details from anywhere in the video
+
+### Timestamp Syntax (TRANSCRIPT-DERIVED TOPICS ONLY)
+Use this STRICT format to couple information with video timestamps:
+
+**Format:** `{text chunk [timestamp|timestamp]}`
+- Curly braces `{}` wrap text with its timestamps
+- Square brackets `[]` contain timestamps in HH:MM:SS format
+- Pipe `|` separates multiple timestamps for same information
+- EVERY factual claim MUST have at least one timestamp
+- Only connecting words stay outside braces
+
+**Example:**
+```
+{Installing Wi-Fi controlled timers [00:04:34|00:06:23]} for {automated garden irrigation systems [00:01:03]} with both {overhead sprinklers [00:06:54]} and {drip lines [00:11:45]}.
+```
+
+**Comment-derived topics:** Use plain text WITHOUT timestamp syntax (comments aren't tied to video timeline)
+
+## 2. Atomic Insights Extraction
+
+For each topic, break down into atomic insights:
+- **Quantitative:** Numbers, metrics, costs, times, quantities, measurements
+- **Qualitative:** Processes, descriptions, opinions, methods, observations
+
+**Inheritance:** Each atomic insight inherits timestamp mappings from its parent topic
+
+### Timestamp Syntax Rules (Same as Topics)
+- Transcript-derived insights: Use `{text [timestamp|timestamp]}` format
+- Comment-derived insights: Plain text without syntax
+
+## 3. Source Attribution
+
+- **Transcript topics:** Use `source_type: "transcript"` and `comment_id: null`
+- **Comment topics:** Use `source_type: "comment"` and include the `comment_id` from input
+
+# Output Format
+
+Return ONLY valid JSON:
+
+```json
+{
+  "topics": [
+    {
+      "topic_title": "Brief descriptive title",
+      "summary_text": "Comprehensive summary using {text [timestamp|timestamp]} syntax for transcript topics, plain text for comment topics",
+      "source_type": "transcript",
+      "confidence_score": 95,
+      "comment_id": null,
+      "atomic_insights": [
+        {
+          "insight_type": "quantitative",
+          "insight_text": "Specific insight using {text [timestamp]} syntax",
+          "confidence_score": 90
+        },
+        {
+          "insight_type": "qualitative",
+          "insight_text": "Another insight with timestamps",
+          "confidence_score": 88
+        }
+      ]
+    }
+  ]
+}
+```
+
+# Critical Rules
+
+1. Use timestamp syntax `{text [HH:MM:SS|HH:MM:SS]}` for ALL transcript-derived content
+2. EVERY factual claim in transcript topics/insights needs timestamps
+3. Include broader context (when, where, who, why, what kind) for complete understanding
+4. Bundle information discussed at multiple timestamps using pipe `|` separator
+5. NO timestamp syntax for comment-derived topics/insights
+6. Confidence scores: 1-100 based on clarity and value
+7. Return ONLY JSON, no explanations

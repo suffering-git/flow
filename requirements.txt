@@ -1,0 +1,21 @@
+# YouTube Data Fetching
+youtube-transcript-api>=0.6.0
+google-api-python-client>=2.0.0
+
+# AI Processing
+google-generativeai>=0.4.0
+pydantic>=2.0.0
+
+# Database
+sqlite-vec>=0.1.0
+
+# Translation
+langdetect>=1.0.9
+googletrans==4.0.0rc1
+
+# Utilities
+python-dotenv>=1.0.0
+colorama>=0.4.6
+
+# Async Support
+aiohttp>=3.9.0
