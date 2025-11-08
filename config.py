@@ -95,5 +95,5 @@ RESET_COMPRESSED_DATA: bool = False
 LOG_LEVEL: str = "INFO"
 
 # Enable file logging in addition to console
-FILE_LOGGING_ENABLED: bool = False
+FILE_LOGGING_ENABLED: bool = True
 LOG_FILE_PATH: str = "data/app.log"
