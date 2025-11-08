@@ -1,0 +1,12 @@
+
+
+
+
+
+
+
+
+pipe terminal output to a file:
+python main.py 2>&1 | tee output.log
+
+
