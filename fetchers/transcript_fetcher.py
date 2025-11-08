@@ -38,20 +38,18 @@ class TranscriptFetcher:
         """
         self.db_manager = db_manager
 
-        # Initialize YouTube Transcript API with Webshare proxies
+        # Configure proxy for YouTube Transcript API if available
         proxy_username = os.getenv("WEBSHARE_PROXY_USERNAME")
         proxy_password = os.getenv("WEBSHARE_PROXY_PASSWORD")
 
         if proxy_username and proxy_password:
-            self.ytt_api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=proxy_username,
-                    proxy_password=proxy_password,
-                )
+            self.proxy_config = WebshareProxyConfig(
+                proxy_username=proxy_username,
+                proxy_password=proxy_password,
             )
             logger.info("✅ Initialized transcript fetcher with Webshare proxies")
         else:
-            self.ytt_api = YouTubeTranscriptApi()
+            self.proxy_config = None
             logger.warning("🟡 No proxy credentials found, using direct connection")
 
     async def fetch_all_transcripts(self) -> None:
@@ -92,7 +90,25 @@ class TranscriptFetcher:
         # Execute concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info("✅ Transcript fetching completed")
+        # Log summary statistics
+        try:
+            stats = self.db_manager.fetchone("""
+                SELECT
+                    COUNT(CASE WHEN transcript_status = 'downloaded' THEN 1 END) as succeeded,
+                    COUNT(CASE WHEN transcript_status = 'unavailable' THEN 1 END) as unavailable,
+                    COUNT(CASE WHEN transcript_status = 'pending' THEN 1 END) as failed
+                FROM Status
+            """)
+
+            logger.info(
+                f"✅ Transcript fetching completed: "
+                f"{stats['succeeded']} succeeded, "
+                f"{stats['unavailable']} unavailable, "
+                f"{stats['failed']} failed"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch transcript statistics: {e}")
+            logger.info("✅ Transcript fetching completed")
 
     async def fetch_transcript(self, video_id: str) -> None:
         """
@@ -110,11 +126,18 @@ class TranscriptFetcher:
         logger.debug(f"📥 Fetching transcript: {video_id}")
 
         try:
-            # Fetch transcript (this is synchronous, so run in executor)
+            # Fetch transcript list (this is synchronous, so run in executor)
+            # Reason: Use instance method with optional proxy configuration
             loop = asyncio.get_event_loop()
+
+            if self.proxy_config:
+                ytt_api = YouTubeTranscriptApi(proxy_config=self.proxy_config)
+            else:
+                ytt_api = YouTubeTranscriptApi()
+
             transcript_list = await loop.run_in_executor(
                 None,
-                lambda: self.ytt_api.list_transcripts(video_id)
+                lambda: ytt_api.list(video_id)
             )
 
             # Try to get English transcript first
@@ -124,32 +147,51 @@ class TranscriptFetcher:
                 is_translated = False
             except:
                 # Get any available transcript and translate
-                transcript = transcript_list.find_generated_transcript(
-                    transcript_list.translation_languages[0]['language_code']
-                )
+                available_transcripts = list(transcript_list)
+                if not available_transcripts:
+                    raise Exception("No transcripts available")
+
+                transcript = available_transcripts[0]
                 original_language = transcript.language_code
-                transcript = transcript.translate('en')
-                is_translated = True
+
+                # Translate to English if not already
+                if original_language != 'en':
+                    transcript = transcript.translate('en')
+                    is_translated = True
+                else:
+                    is_translated = False
 
             # Fetch transcript data
-            transcript_data = await loop.run_in_executor(
+            fetched_transcript = await loop.run_in_executor(
                 None,
                 transcript.fetch
             )
+
+            # Convert to raw data (list of dicts)
+            # Reason: FetchedTranscript has .to_raw_data() method
+            transcript_data = fetched_transcript.to_raw_data()
 
             # Embed timestamps in text
             transcript_text = self._embed_timestamps(transcript_data)
 
             # Store in database
             with self.db_manager.transaction() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO RawTranscripts
-                    (video_id, original_language, transcript_text, is_translated)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (video_id, original_language, transcript_text, is_translated)
-                )
+                # Reason: Check if transcript already exists before inserting
+                # (to handle re-runs gracefully)
+                existing = cursor.execute(
+                    "SELECT video_id FROM RawTranscripts WHERE video_id = ?",
+                    (video_id,)
+                ).fetchone()
+
+                if not existing:
+                    cursor.execute(
+                        """
+                        INSERT INTO RawTranscripts
+                        (video_id, original_language, transcript_text, is_translated)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (video_id, original_language, transcript_text, is_translated)
+                    )
 
                 # Update status
                 cursor.execute(
@@ -162,7 +204,9 @@ class TranscriptFetcher:
                     (datetime.now(), video_id)
                 )
 
-            logger.debug(f"✅ Transcript downloaded: {video_id}")
+            # Log success at DEBUG level with details
+            word_count = len(transcript_text.split())
+            logger.debug(f"✅ Transcript downloaded: {video_id} ({word_count:,} words, lang: {original_language})")
 
         except NoTranscriptFound:
             # Permanent failure - no transcript available

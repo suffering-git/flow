@@ -3,12 +3,66 @@
 </h1>
 
 <p align="center">
+  <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=BAENLEW8VUJ6G&source=url">
+    <img src="https://img.shields.io/badge/Donate-PayPal-green.svg" alt="Donate">
+  </a>
+  <a href="https://github.com/jdepoix/youtube-transcript-api/actions">
+    <img src="https://github.com/jdepoix/youtube-transcript-api/actions/workflows/ci.yml/badge.svg?branch=master" alt="Build Status">
+  </a>
+  <a href="https://coveralls.io/github/jdepoix/youtube-transcript-api?branch=master">
+    <img src="https://coveralls.io/repos/github/jdepoix/youtube-transcript-api/badge.svg?branch=master" alt="Coverage Status">
+  </a>
+  <a href="http://opensource.org/licenses/MIT">
+    <img src="http://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat" alt="MIT license">
+  </a>
+  <a href="https://pypi.org/project/youtube-transcript-api/">
+    <img src="https://img.shields.io/pypi/v/youtube-transcript-api.svg" alt="Current Version">
+  </a>
+  <a href="https://pypi.org/project/youtube-transcript-api/">
+    <img src="https://img.shields.io/pypi/pyversions/youtube-transcript-api.svg" alt="Supported Python Versions">
+  </a>
+</p>
+
+<p align="center">
   <b>This is a python API which allows you to retrieve the transcript/subtitles for a given YouTube video. It also works for automatically generated subtitles, supports translating subtitles and it does not require a headless browser, like other selenium based solutions do!</b>
 </p>
 <p align="center">
  Maintenance of this project is made possible by all the <a href="https://github.com/jdepoix/youtube-transcript-api/graphs/contributors">contributors</a> and <a href="https://github.com/sponsors/jdepoix">sponsors</a>. If you'd like to sponsor this project and have your avatar or company logo appear below <a href="https://github.com/sponsors/jdepoix">click here</a>. 💖
 </p>
 
+<p align="center">
+  <a href="https://www.searchapi.io">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://www.searchapi.io/press/v1/svg/searchapi_logo_white_h.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://www.searchapi.io/press/v1/svg/searchapi_logo_black_h.svg">
+      <img alt="SearchAPI" src="https://www.searchapi.io/press/v1/svg/searchapi_logo_black_h.svg" height="40px" style="vertical-align: middle;">
+    </picture>
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://supadata.ai">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://supadata.ai/logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://supadata.ai/logo-light.svg">
+      <img alt="supadata" src="https://supadata.ai/logo-light.svg" height="40px">
+    </picture>
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.dumplingai.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://www.dumplingai.com/logos/logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://www.dumplingai.com/logos/logo-light.svg">
+      <img alt="Dumpling AI" src="https://www.dumplingai.com/logos/logo-light.svg" height="40px" style="vertical-align: middle;">
+    </picture>
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://vcyon.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://vcyon.com/logo/vcyon-logo-text-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://vcyon.com/logo/vcyon-logo-text-light.png">
+      <img alt="VCyon" src="https://vcyon.com/logo/vcyon-logo-text-light.png" height="40px" style="vertical-align: middle;">
+    </picture>
+  </a>
+</p>
 
 ## Install
 
@@ -533,3 +587,10 @@ If you just want to make sure that your code passes all the necessary checks to 
 ```shell
 poe precommit
 ```
+
+## Donations
+
+If this project makes you happy by reducing your development time, you can make me happy by treating me to a cup of 
+coffee, or become a [Sponsor of this project](https://github.com/sponsors/jdepoix) :)  
+
+[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=BAENLEW8VUJ6G&source=url)

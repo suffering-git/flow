@@ -79,17 +79,21 @@ def get_logger(name: str) -> logging.Logger:
     if not logger.handlers:
         logger.setLevel(getattr(logging, config.LOG_LEVEL))
 
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
+        # Console handler with UTF-8 encoding for emoji support
+        # Reason: Windows console defaults to cp1252, which can't encode emojis
+        import io
+        console_handler = logging.StreamHandler(
+            io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+        )
         console_handler.setFormatter(EmojiFormatter())
         logger.addHandler(console_handler)
 
-        # File handler (optional)
+        # File handler (optional) with UTF-8 encoding for emoji support
         if config.FILE_LOGGING_ENABLED:
             import os
             os.makedirs(os.path.dirname(config.LOG_FILE_PATH), exist_ok=True)
 
-            file_handler = logging.FileHandler(config.LOG_FILE_PATH)
+            file_handler = logging.FileHandler(config.LOG_FILE_PATH, encoding='utf-8')
             file_handler.setFormatter(
                 logging.Formatter(
                     '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',

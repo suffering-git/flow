@@ -82,7 +82,9 @@ class TranslationHelper:
         try:
             return detect(text)
         except LangDetectException as e:
-            logger.warning(f"🟡 Language detection failed: {e}")
+            # Reason: Language detection fails on emojis/short text (~0.16% of comments)
+            # This is expected behavior, so log at DEBUG level to avoid noise
+            logger.debug(f"🟡 Language detection failed: {e}")
             return None
 
     def translate_to_english(self, text: str, source_lang: str) -> Optional[str]:

@@ -81,7 +81,25 @@ class Stage2Processor:
         # Execute concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info("✅ Stage 2 processing completed")
+        # Log summary statistics
+        try:
+            stats = self.db_manager.fetchone("""
+                SELECT
+                    COUNT(*) as videos_processed,
+                    (SELECT COUNT(*) FROM TopicSummaries) as topics_created,
+                    (SELECT COUNT(*) FROM AtomicInsights) as insights_created
+                FROM Status
+                WHERE stage_2_status = 'completed'
+            """)
+            logger.info(
+                f"✅ Stage 2 processing completed: "
+                f"{stats['videos_processed']} videos, "
+                f"{stats['topics_created']} topics, "
+                f"{stats['insights_created']} insights"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch Stage 2 statistics: {e}")
+            logger.info("✅ Stage 2 processing completed")
 
     async def process_video(self, video_id: str) -> None:
         """

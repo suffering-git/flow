@@ -78,11 +78,30 @@ class CommentFetcher:
         # Execute concurrently (semaphore in fetch_comments controls rate)
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info("✅ Comment fetching completed")
+        # Log summary statistics
+        try:
+            stats = self.db_manager.fetchone("""
+                SELECT
+                    COUNT(CASE WHEN comments_status = 'downloaded' THEN 1 END) as succeeded,
+                    COUNT(CASE WHEN comments_status = 'disabled' THEN 1 END) as disabled,
+                    COUNT(CASE WHEN comments_status = 'pending' THEN 1 END) as failed,
+                    (SELECT COUNT(*) FROM RawComments) as total_comments
+                FROM Status
+            """)
+
+            logger.info(
+                f"✅ Comment fetching completed: "
+                f"{stats['succeeded']} videos succeeded ({stats['total_comments']:,} comments), "
+                f"{stats['disabled']} disabled, "
+                f"{stats['failed']} failed"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch comment statistics: {e}")
+            logger.info("✅ Comment fetching completed")
 
     async def fetch_comments(self, video_id: str) -> None:
         """
-        Fetch all comments for a single video with pagination.
+        Fetch all comments for a single video with pagination and retry logic.
 
         Args:
             video_id: YouTube video ID.
@@ -90,7 +109,23 @@ class CommentFetcher:
         async with self.semaphore:
             logger.debug(f"💬 Fetching comments: {video_id}")
 
-            try:
+            # Retry configuration
+            max_retries = 3
+            base_delay = 1.0  # seconds
+
+            for attempt in range(max_retries + 1):
+                try:
+                    # Recreate YouTube client on retries to get fresh SSL connection
+                    # Reason: Stale connections cause SSL handshake failures
+                    if attempt > 0:
+                        logger.debug(f"🔄 Retry {attempt}/{max_retries} for comments: {video_id}")
+                        self.youtube = build(
+                            "youtube",
+                            "v3",
+                            developerKey=os.getenv("YOUTUBE_API_KEY")
+                        )
+                        # Exponential backoff
+                        await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
                 all_comments = []
                 next_page_token = None
 
@@ -133,9 +168,11 @@ class CommentFetcher:
                 if all_comments:
                     with self.db_manager.transaction() as cursor:
                         for comment in all_comments:
+                            # Reason: Use INSERT OR IGNORE to handle re-runs gracefully
+                            # (comments may already exist from previous runs)
                             cursor.execute(
                                 """
-                                INSERT INTO RawComments
+                                INSERT OR IGNORE INTO RawComments
                                 (comment_id, video_id, author_name, author_channel_id,
                                  comment_text, original_language, is_translated,
                                  parent_comment_id, like_count, published_at)
@@ -166,31 +203,95 @@ class CommentFetcher:
                             (datetime.now(), video_id)
                         )
 
-                logger.debug(
-                    f"✅ Fetched {len(all_comments)} comments for {video_id}"
-                )
+                    # Log success at DEBUG level with details
+                    logger.debug(
+                        f"✅ Comments downloaded: {video_id} ({len(all_comments):,} comments)"
+                    )
 
-            except HttpError as e:
-                # Check if comments are disabled
-                if 'commentsDisabled' in str(e):
-                    logger.warning(f"🟡 Comments disabled: {video_id}")
-                    with self.db_manager.transaction() as cursor:
-                        cursor.execute(
-                            """
-                            UPDATE Status
-                            SET comments_status = 'disabled',
-                                last_updated = ?
-                            WHERE video_id = ?
-                            """,
-                            (datetime.now(), video_id)
+                    # Success - break retry loop
+                    break
+
+                except HttpError as e:
+                    # Check if comments are disabled (permanent failure)
+                    if 'commentsDisabled' in str(e):
+                        logger.warning(f"🟡 Comments disabled: {video_id}")
+                        with self.db_manager.transaction() as cursor:
+                            cursor.execute(
+                                """
+                                UPDATE Status
+                                SET comments_status = 'disabled',
+                                    last_updated = ?
+                                WHERE video_id = ?
+                                """,
+                                (datetime.now(), video_id)
+                            )
+                        break  # Don't retry for disabled comments
+                    else:
+                        # Transient HTTP error - leave as pending (don't retry quota errors)
+                        logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
+                        break  # Don't retry HTTP errors
+
+                except (OSError, ConnectionError, TimeoutError) as e:
+                    # SSL/network errors - retry with backoff
+                    error_name = e.__class__.__name__
+                    is_ssl_error = 'SSL' in str(e) or 'ssl' in str(e).lower()
+
+                    if attempt < max_retries:
+                        # Will retry
+                        logger.warning(
+                            f"⚠️ {error_name} for {video_id} (attempt {attempt + 1}/{max_retries + 1}): {e}"
                         )
-                else:
-                    # Transient error - leave as pending
-                    logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
+                        continue  # Retry
+                    else:
+                        # Max retries exhausted - mark as failed
+                        logger.error(
+                            f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: {e}"
+                        )
+                        with self.db_manager.transaction() as cursor:
+                            cursor.execute(
+                                """
+                                UPDATE Status
+                                SET comments_status = 'failed',
+                                    last_updated = ?
+                                WHERE video_id = ?
+                                """,
+                                (datetime.now(), video_id)
+                            )
+                        break
 
-            except Exception as e:
-                # Other errors - leave as pending
-                logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
+                except Exception as e:
+                    # Unknown errors - check if SSL-related
+                    is_ssl_error = 'SSL' in str(e) or 'ssl' in str(e).lower()
+                    is_connection_error = any(x in str(e).lower() for x in [
+                        'connection', 'timeout', 'remote end closed'
+                    ])
+
+                    if (is_ssl_error or is_connection_error) and attempt < max_retries:
+                        # SSL/connection error - retry
+                        logger.warning(
+                            f"⚠️ Connection error for {video_id} (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                        )
+                        continue  # Retry
+                    else:
+                        # Non-retryable or max retries exhausted
+                        if attempt >= max_retries:
+                            logger.error(
+                                f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: {e}"
+                            )
+                        else:
+                            logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
+
+                        with self.db_manager.transaction() as cursor:
+                            cursor.execute(
+                                """
+                                UPDATE Status
+                                SET comments_status = 'failed',
+                                    last_updated = ?
+                                WHERE video_id = ?
+                                """,
+                                (datetime.now(), video_id)
+                            )
+                        break
 
     def _process_comment(self, comment_data: dict[str, Any]) -> dict[str, Any]:
         """

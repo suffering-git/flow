@@ -105,7 +105,17 @@ class Stage3Processor:
             # Mark video as complete
             await self.finalize_video_embedding_status(video_id)
 
-        logger.info("✅ Stage 3 embedding generation completed")
+        # Log summary statistics
+        try:
+            stats = self.db_manager.fetchone("""
+                SELECT COUNT(*) as insights_embedded
+                FROM AtomicInsights
+                WHERE embedding_vector IS NOT NULL
+            """)
+            logger.info(f"✅ Stage 3 embedding generation completed: {stats['insights_embedded']} insights embedded")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch Stage 3 statistics: {e}")
+            logger.info("✅ Stage 3 embedding generation completed")
 
     async def generate_embedding(
         self,

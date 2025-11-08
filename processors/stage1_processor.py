@@ -58,7 +58,7 @@ class Stage1Processor:
             """
             SELECT video_id FROM Status
             WHERE (transcript_status IN ('downloaded', 'unavailable'))
-              AND (comments_status IN ('downloaded', 'disabled'))
+              AND (comments_status IN ('downloaded', 'disabled', 'failed'))
               AND stage_1_status = 'pending'
             """
         )
@@ -81,7 +81,15 @@ class Stage1Processor:
         # Execute concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info("✅ Stage 1 processing completed")
+        # Log summary statistics
+        try:
+            completed = self.db_manager.fetchone(
+                "SELECT COUNT(*) as cnt FROM Status WHERE stage_1_status = 'completed'"
+            )
+            logger.info(f"✅ Stage 1 processing completed: {completed['cnt']} videos compressed")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch Stage 1 statistics: {e}")
+            logger.info("✅ Stage 1 processing completed")
 
     async def process_video(self, video_id: str) -> None:
         """
