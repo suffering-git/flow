@@ -96,7 +96,11 @@ class RateLimiter:
         self._check_rate_limits()
 
         # Log periodic summaries
-        if self.requests_since_log >= config.LOG_EVERY_N_REQUESTS:
+        if self.requests_since_log >= config.LOG_USAGE_EVERY_N_REQUESTS:
+            self._log_usage_summary()
+            self.requests_since_log = 0
+            self.tokens_since_log = 0
+        elif self.tokens_since_log >= config.LOG_USAGE_EVERY_X_TOKENS:
             self._log_usage_summary()
             self.requests_since_log = 0
             self.tokens_since_log = 0

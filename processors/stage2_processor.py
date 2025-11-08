@@ -97,7 +97,7 @@ class Stage2Processor:
                 # Fetch compressed data
                 compressed_row = self.db_manager.fetchone(
                     """
-                    SELECT compressed_transcript, compressed_comments_json
+                    SELECT compressed_transcript, compressed_comments
                     FROM CompressedData
                     WHERE video_id = ?
                     """,
@@ -109,7 +109,7 @@ class Stage2Processor:
                     return
 
                 compressed_transcript = compressed_row['compressed_transcript']
-                compressed_comments_json = compressed_row['compressed_comments_json']
+                compressed_comments_json = compressed_row['compressed_comments']
 
                 # Parse comments JSON
                 compressed_comments = json.loads(compressed_comments_json) if compressed_comments_json else []
@@ -268,8 +268,8 @@ class Stage2Processor:
                     )
                 )
 
-                # Get the topic_summary_id
-                topic_summary_id = cursor.lastrowid
+                # Get the summary_id
+                summary_id = cursor.lastrowid
 
                 # Store nested atomic insights
                 for insight in topic.atomic_insights:
@@ -281,15 +281,16 @@ class Stage2Processor:
                     cursor.execute(
                         """
                         INSERT INTO AtomicInsights
-                        (topic_summary_id, insight_type, insight_text,
-                         insight_timestamps, confidence_score)
-                        VALUES (?, ?, ?, ?, ?)
+                        (summary_id, insight_type, insight_text,
+                         insight_timestamps, confidence_score, source_type)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            topic_summary_id,
+                            summary_id,
                             insight.insight_type,
                             parsed_insight['full_text'],
                             json.dumps(parsed_insight['timestamped_segments']),
-                            insight.confidence_score
+                            insight.confidence_score,
+                            topic.source_type
                         )
                     )

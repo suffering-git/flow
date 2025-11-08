@@ -143,13 +143,13 @@ class Stage1Processor:
                     cursor.execute(
                         """
                         INSERT INTO CompressedData
-                        (video_id, compressed_transcript, compressed_comments_json)
+                        (video_id, compressed_transcript, compressed_comments)
                         VALUES (?, ?, ?)
                         """,
                         (
                             video_id,
                             validated_output.compressed_transcript,
-                            json.dumps([c.dict() for c in validated_output.compressed_comments])
+                            json.dumps([c.model_dump() for c in validated_output.compressed_comments])
                         )
                     )
 

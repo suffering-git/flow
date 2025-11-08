@@ -87,7 +87,7 @@ class GeminiClient:
 
     async def generate_embedding(self, text: str) -> list[float]:
         """
-        Generate embedding for text.
+        Generate embedding for text asynchronously.
 
         Args:
             text: Input text to embed.
@@ -96,11 +96,18 @@ class GeminiClient:
             Embedding vector as list of floats.
         """
         try:
-            # Generate embedding using Gemini embedding model
-            result = genai.embed_content(
-                model=self.model_code,
-                content=text,
-                task_type="retrieval_document"
+            # Reason: genai.embed_content is synchronous, so run in executor
+            # to avoid blocking the event loop
+            import asyncio
+            loop = asyncio.get_event_loop()
+
+            result = await loop.run_in_executor(
+                None,
+                lambda: genai.embed_content(
+                    model=self.model_code,
+                    content=text,
+                    task_type="retrieval_document"
+                )
             )
 
             logger.debug(f"🔢 Generated embedding for text ({len(text)} chars)")

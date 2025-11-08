@@ -3,13 +3,13 @@ Language detection and translation utilities.
 
 Provides helpers for:
 - Language detection using langdetect
-- Translation using googletrans
+- Translation using deep-translator (GoogleTranslator)
 - Error handling for translation failures
 """
 
 from typing import Optional, Tuple
 from langdetect import detect, LangDetectException
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
 from utils.logger import get_logger
 
@@ -19,11 +19,15 @@ logger = get_logger(__name__)
 class TranslationHelper:
     """
     Helper class for language detection and translation.
+
+    Uses deep-translator for more reliable translation service.
     """
 
     def __init__(self):
         """Initialize translation helper."""
-        self.translator = Translator()
+        # Note: GoogleTranslator is instantiated per translation call
+        # This avoids session management issues
+        pass
 
     def detect_and_translate(self, text: str) -> Tuple[str, str, bool]:
         """
@@ -83,7 +87,7 @@ class TranslationHelper:
 
     def translate_to_english(self, text: str, source_lang: str) -> Optional[str]:
         """
-        Translate text to English.
+        Translate text to English using deep-translator.
 
         Args:
             text: Input text.
@@ -93,8 +97,10 @@ class TranslationHelper:
             Translated text or None if translation fails.
         """
         try:
-            result = self.translator.translate(text, src=source_lang, dest='en')
-            return result.text
+            # Create translator instance for this specific translation
+            translator = GoogleTranslator(source=source_lang, target='en')
+            result = translator.translate(text)
+            return result
         except Exception as e:
             logger.warning(f"🟡 Translation failed: {e}")
             return None

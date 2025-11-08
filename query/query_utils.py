@@ -63,7 +63,7 @@ class QueryUtils:
                 v.video_id
             FROM insights_fts fts
             JOIN AtomicInsights ai ON fts.rowid = ai.insight_id
-            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
             JOIN Videos v ON ts.video_id = v.video_id
             WHERE insights_fts MATCH ?
             ORDER BY rank
@@ -107,14 +107,14 @@ class QueryUtils:
                 ai.insight_id,
                 ai.insight_text,
                 ai.insight_type,
-                ai.embedding,
+                ai.embedding_vector,
                 ts.topic_title,
                 v.video_title,
                 v.video_id
             FROM AtomicInsights ai
-            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
             JOIN Videos v ON ts.video_id = v.video_id
-            WHERE ai.embedding IS NOT NULL
+            WHERE ai.embedding_vector IS NOT NULL
             """
         )
 
@@ -124,7 +124,7 @@ class QueryUtils:
         for row in all_insights:
             # Deserialize embedding
             import struct
-            embedding_bytes = row['embedding']
+            embedding_bytes = row['embedding_vector']
             num_floats = len(embedding_bytes) // 4
             embedding = list(struct.unpack(f'<{num_floats}f', embedding_bytes))
 
@@ -137,7 +137,7 @@ class QueryUtils:
             if similarity >= similarity_threshold:
                 result = dict(row)
                 result['similarity'] = similarity
-                del result['embedding']  # Don't return raw embedding
+                del result['embedding_vector']  # Don't return raw embedding
                 results_with_scores.append(result)
 
         # Sort by similarity and limit
@@ -180,7 +180,7 @@ class QueryUtils:
                 v.published_date,
                 c.channel_name
             FROM AtomicInsights ai
-            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
             JOIN Videos v ON ts.video_id = v.video_id
             JOIN Channels c ON v.channel_id = c.channel_id
             WHERE ai.insight_id = ?
@@ -309,7 +309,7 @@ class QueryUtils:
                 ai.confidence_score,
                 ts.topic_title
             FROM AtomicInsights ai
-            JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+            JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
             WHERE ts.video_id = ?
             ORDER BY ai.insight_id
             """,
@@ -333,14 +333,14 @@ class QueryUtils:
         results = self.db_manager.fetchall(
             """
             SELECT
-                topic_summary_id,
+                summary_id,
                 topic_title,
                 summary_text,
                 source_type,
                 confidence_score
             FROM TopicSummaries
             WHERE video_id = ?
-            ORDER BY topic_summary_id
+            ORDER BY summary_id
             """,
             (video_id,)
         )

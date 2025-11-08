@@ -77,9 +77,9 @@ class Stage3Processor:
                 """
                 SELECT ai.insight_id, ai.insight_text
                 FROM AtomicInsights ai
-                JOIN TopicSummaries ts ON ai.topic_summary_id = ts.topic_summary_id
+                JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
                 WHERE ts.video_id = ?
-                  AND ai.embedding IS NULL
+                  AND ai.embedding_vector IS NULL
                 """,
                 (video_id,)
             )
@@ -141,7 +141,7 @@ class Stage3Processor:
                     cursor.execute(
                         """
                         UPDATE AtomicInsights
-                        SET embedding = ?
+                        SET embedding_vector = ?
                         WHERE insight_id = ?
                         """,
                         (embedding_bytes, insight_id)
