@@ -18,7 +18,7 @@
     - [**Hybrid Search System:**](#hybrid-search-system)
     - [**Database Reset Logic:**](#database-reset-logic)
 - [**Key Structures**](#key-structures)
-    - [**AI Response Data Structures**](#ai-response-data-structures)
+    - [**Response Data Structures**](#response-data-structures)
     - [**Data Model / Schema**](#data-model--schema)
 
 
@@ -34,9 +34,9 @@ A Python-based tool to download video transcripts and comments from YouTube chan
 *   Implements resumable operations with status tracking for reliability
 
 #### **AI Processing Pipeline:**
-*   Stage 1: Extracts and summarizes raw content into topic-based summaries
-*   Stage 2: Refines summaries into atomic insights (quantitative/qualitative)
-*   Stage 3: Generates vector embeddings for semantic search capabilities
+*   Stage 1: Compresses raw data while preserving precise timestamps for cost efficiency
+*   Stage 2: Generates topic summaries and atomic insights (quantitative/qualitative) with exact timing
+*   Stage 3: Creates vector embeddings for semantic search capabilities
 *   Each stage is independently resumable and fully decoupled
 
 #### **Search & Query System:**
@@ -95,7 +95,7 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Primary Mechanism:** A `Status` table in the database will have one row for every video and will track its state through all stages: `transcript_status`, `comments_status`, `stage_1_status`, `stage_2_status`, `embedding_status`. Before any action is taken on a video, the script will first query this table to check its status. Downloads are tracked separately (`transcript_status`, `comments_status`) since they use different APIs and can fail independently, while AI processing stages are tracked as unified operations since each stage processes all available data together.
     *   **Stage Dependencies:** The system enforces clear dependencies between stages:
         *   Stage 1 requires completed transcript/comment downloads (waits for both to complete OR one to permanently fail)
-        *   Stage 2 requires completed Stage 1 (topic summaries must exist)
+        *   Stage 2 requires completed Stage 1 (compressed data must exist)
         *   Stage 3 (embeddings) requires completed Stage 2 (atomic insights must exist)
     *   **Single Source of Truth:** The database status table is the authoritative source for all processing state.
     *   **State Consistency Protection:** To prevent logical inconsistencies where status records indicate completion but actual data is missing, all operations that update both data tables and the `Status` table will be wrapped in transactions. This ensures that if a data insertion fails after a status update, the status change is automatically rolled back, keeping the video eligible for retry on the next run.
@@ -120,13 +120,25 @@ A Python-based tool to download video transcripts and comments from YouTube chan
     *   **Translation Fallback:** If language detection or translation fails, the system logs the error but stores the original comment text, allowing manual review or retry with different parameters. Comment data is stored directly in the database.
 
 #### **AI Prompt Construction:**
-*   **Timing Preservation:** All AI processing prompts must instruct models to preserve and include appropriate timestamp references in outputs, enabling users to navigate directly to source content in videos.
-*   TODO: Define specific prompt templates and instructions for each processing stage
+* TODO: Finish describing AI prompt construction preferences.
+*   **Stage 2 Timestamp Syntax Rules:** The AI must format all transcript-derived content using strict inline timestamp syntax to couple relevant information with precise video timestamps:
+    *   **Format:** `{text chunk [timestamp|timestamp]}` where curly braces group text, square brackets contain timestamps in HH:MM:SS format, and pipe characters separate multiple timestamps
+    *   **Requirement:** Every factual claim or piece of information must have at least one timestamp reference - no exceptions
+    *   **Multiple Timestamps:** When the same information is discussed at multiple points in the video, include all relevant timestamps: `{text [00:01:23|00:05:47|00:12:30]}`
+    *   **Unwrapped Text:** Only connecting words, prepositions, and non-factual glue text should appear outside curly braces
+    *   **Example:** `"Detailed explanation of {installing Wi-Fi timers [00:04:34|00:06:23]} for {automated irrigation [00:01:03]} with {overhead sprinklers [00:06:54]} and {drip lines [00:11:45]}."`
+    *   **Comment Content:** Comment-derived topics and insights have no timestamps (comments aren't tied to video timeline), so use plain text without syntax
+*   **Stage 2 Contextual Analysis Philosophy:** The AI must extract comprehensive, bigger-picture information for each topic, going beyond immediate surface details:
+    *   **Holistic Context:** For every topic, capture not just the immediate facts (what, how) but also the broader context: when (time of year, stage of process), where (location, setting, environment), who (people involved, target audience), why (purpose, motivation, goals), and what kind (scale, type, category)
+    *   **Cross-Referencing:** Actively connect and integrate related information from different parts of the video to build complete understanding of each topic
+    *   **Example Scenario:** If a video discusses "washing lettuce by hand," don't only capture the washing method and time required. Also include: the type of growing operation (market garden, CSA), time of year it's happening, who it's being sold to (farmers market, restaurant), what bed/variety it came from, post-harvest handling steps, and any other contextual details mentioned anywhere in the video
+    *   **Multiple Perspectives:** Bundle all relevant information about a topic even when discussed at different timestamps throughout the video
+    *   **Atomic Insight Inheritance:** Each atomic insight inherits the timestamp mappings from its parent topic summary, maintaining precise source attribution at the most granular level
 
 #### **3-Stage AI Processing Pipeline:**
-*   The entire pipeline follows the flow: Raw Data → DB → Stage 1 → DB → Stage 2 → DB → Stage 3 → DB → User Queries. The 3-stage AI pipeline extracts and summarizes raw data into topic-based summaries, then refines and atomizes this content into two distinct data types: `quantitative` (numerical insights) and `qualitative` (descriptive insights), and finally generates embeddings for semantic search. **Processing Strategy:** All stages use batch processing - each stage processes all eligible videos before moving to the next stage (e.g., complete all transcript/comment downloads, then all Stage 1 processing, etc.). Transcript and comment downloads run simultaneously. A `stop_after_stage` setting in `config.py` allows users to halt processing at any stage: `'downloads'` (raw data only), `'stage_1'` (topic summaries), `'stage_2'` (atomic insights), or `'stage_3'` (complete pipeline with embeddings). Each stage runs independently on the previous level of data and saves its output to the database. Rate limiting is controlled by three distinct 'max concurrent requests' values in `config.py` to independently control asynchronous request limits for each Gemini model (stages 1, 2, 3).
-    *   **Stage 1 (Extract & Summarize):** **Input:** Concatenated transcript text with embedded timestamps (e.g., `[00:02:42]`) and structured comment data for a video, processed together in a single request to enable cross-referencing between video content and viewer discussions. If only one data source is available (due to the other being disabled/unavailable), processing continues with available data. **Process:** A cost-effective model (e.g., Gemini Flash) is prompted to extract all valuable data and organize it into paragraph summaries of each major topic discussed, clearly identifying whether each topic originated from the transcript or a comment, with representative timestamps for navigation. **Output:** Multiple topic-based paragraph blurbs stored in the `TopicSummaries` table with source attribution via `source_type` field. **Status Update:** `stage_1_status` set to 'complete' with ✅ log entry.
-    *   **Stage 2 (Refine & Atomize):** **Input:** All topic blurbs for a video (both transcript and comment-derived) from the `TopicSummaries` table. **Process:** A powerful model (e.g., Gemini Pro) processes the entire video's blurbs at once to: 1) filter out vague or low-value content, and 2) break down the remaining valuable content into atomic records classified as either `quantitative` or `qualitative`. Source attribution is preserved through foreign key relationships. **Output:** Atomic insights stored in the `AtomicInsights` table with foreign key references to their source topic summaries. **Status Update:** `stage_2_status` set to 'complete' with ✅ log entry.
+*   The entire pipeline follows the flow: Raw Data → DB → Stage 1 → DB → Stage 2 → DB → Stage 3 → DB → User Queries. The 3-stage AI pipeline compresses raw data while preserving precise timestamps, generates topic summaries and atomic insights with exact timing references, and creates vector embeddings for semantic search. **Processing Strategy:** All stages use batch processing - each stage processes all eligible videos before moving to the next stage (e.g., complete all transcript/comment downloads, then all Stage 1 processing, etc.). Transcript and comment downloads run simultaneously. A `stop_after_stage` setting in `config.py` allows users to halt processing at any stage: `'downloads'` (raw data only), `'stage_1'` (compressed data), `'stage_2'` (topic summaries and atomic insights), or `'stage_3'` (complete pipeline with embeddings). Each stage runs independently on the previous level of data and saves its output to the database. Rate limiting is controlled by three distinct 'max concurrent requests' values in `config.py` to independently control asynchronous request limits for each Gemini model (stages 1, 2, 3).
+    *   **Stage 1 (Data Compression):** **Input:** Concatenated transcript text with embedded timestamps (e.g., `[00:02:42]`) and structured comment data for a video, processed together in a single request. If only one data source is available (due to the other being disabled/unavailable), processing continues with available data. **Process:** A highly cost-effective model (e.g., Gemini Flash-Lite) is prompted to compress and filter raw data, removing irrelevant or low-value content while preserving all precise timestamp information and factual content. The goal is maximum data reduction for cost savings while maintaining all timestamps and valuable information. **Output:** Compressed data stored in the `CompressedData` table with all timestamps intact. **Status Update:** `stage_1_status` set to 'complete' with ✅ log entry.
+    *   **Stage 2 (Analysis & Extraction):** **Input:** Compressed transcript and comment data from the `CompressedData` table, which retains all precise timestamps. **Process:** A powerful model (e.g., Gemini Pro) processes the compressed data to: 1) extract and organize major topics discussed with representative timestamps, and 2) break down content into atomic insights classified as either `quantitative` or `qualitative`, each with precise timestamp references for navigation. The model processes all data for a video in a single request to enable cross-referencing between topics and insights. Source attribution is preserved through the pipeline. **Output:** Topic summaries stored in the `TopicSummaries` table and atomic insights stored in the `AtomicInsights` table with foreign key relationships and precise timing data. **Status Update:** `stage_2_status` set to 'complete' with ✅ log entry.
     *   **Stage 3 (Generate Embeddings):** **Input:** All atomic insights for a video from the `AtomicInsights` table. **Process:** Each atomic insight text is sent to Gemini's embedding API to generate a vector representation. **Output:** Embedding vectors stored in the `embedding_vector` column of the `AtomicInsights` table and indexed via sqlite-vec. **Status Update:** `embedding_status` set to 'complete' with ✅ log entry.
 
 #### **Hybrid Search System:**
@@ -143,51 +155,150 @@ A Python-based tool to download video transcripts and comments from YouTube chan
 
 #### **Database Reset Logic:**
 *   The system includes a safe reset mechanism for experimentation, enabling complete re-processing with different prompts or models:
-    *   **What Gets Reset:** All AI processing results are cleared from the database:
-        *   All records from `TopicSummaries` table (Stage 1 results)
-        *   All records from `AtomicInsights` table (Stage 2 results and embeddings)
-        *   Processing status flags reset to 'pending' for `stage_1_status`, `stage_2_status`, and `embedding_status` in `Status` table
+    *   **What Gets Reset:** Certain AI processing results are cleared from the database:
+        *   All records from `TopicSummaries` table (Stage 2 results)
+        *   All records from `AtomicInsights` table (Stage 2 results and Stage 3 embeddings)
+        *   Processing status flags reset to 'pending' for `stage_2_status` and `embedding_status` in `Status` table
+    *   **Optional Reset:** A `reset_compressed_data` setting in `config.py` (defaults to `False`) controls whether to also reset:
+        *   All records from `CompressedData` table (Stage 1 results)
+        *   `stage_1_status` flag in `Status` table
+        *   Rationale: Compressed data is typically unaffected by prompt/model changes since Stage 1 only performs basic filtering and compression, making it wasteful to regenerate
     *   **What Gets Preserved:** Raw data and metadata remain intact:
         *   All raw transcript and comment data stored in the `RawTranscripts` and `RawComments` tables
         *   All records in `Channels`, `Videos`, and `Status` tables
         *   Download status flags (`transcript_status`, `comments_status`) remain unchanged
+        *   Compressed data (unless `reset_compressed_data=True`)
     *   **Implementation:** A dedicated `reset_processing.py` script provides a safe, logged operation with confirmation prompts and progress indicators using ✅ and 🔄 emoji logging.
   
 ## **Key Structures**
 
-#### **AI Response Data Structures**
+#### **Response Data Structures**
 *   **Raw Data Structures:** Raw content is stored as-is from API responses without validation - the APIs provide consistent enough data for the project lifecycle:
     *   **Transcript Data:** Full raw transcript text with `start` timestamps for navigation purposes (duration not stored)
     *   **Comment Data:** All comment data with thread structure preserved, including author channel IDs and reply indicators
 
-*   **Stage 1 Output Structure:** JSON array of topic summary objects for database insertion:
+*   **Stage 1 Input Structure:** Data fetched from the database and formatted for AI processing:
+    *   **Transcript Input:** Raw transcript text from `RawTranscripts` table with timestamps embedded in the text (e.g., `"[00:00:15] First sentence here. [00:00:23] Next sentence."`)
+    *   **Comments Input:** Minimal comment data from `RawComments` table, only comment_id and comment_text:
 ```json
 [
   {
-    "topic_title": "Automated Irrigation Setup",
-    "summary_text": "Detailed explanation of installing Wi-Fi controlled timers for automated garden irrigation systems with both overhead sprinklers and drip lines.",
-    "source_type": "transcript",
-    "representative_timestamp": "00:01:30",
-    "confidence_score": 95,
-    "like_count": null
+    "comment_id": "xyz123",
+    "comment_text": "This is really helpful information about drip irrigation costs!"
   },
   {
-    "topic_title": "Equipment Cost Comparison",
-    "summary_text": "Viewer discussion about different price points for drip line connectors, comparing $3 premium options vs 25 cent economy alternatives.",
-    "source_type": "comment",
-    "representative_timestamp": null,
-    "confidence_score": 78,
-    "like_count": 12
+    "comment_id": "abc456",
+    "comment_text": "Do these timers work in freezing temperatures?"
   }
 ]
 ```
-*   **Pydantic Validation:** `topic_title` (str, required), `summary_text` (str, required), `source_type` (Literal["transcript", "comment"], required), `representative_timestamp` (Optional[str], format HH:MM:SS), `confidence_score` (int, 1-100), `like_count` (Optional[int], null for transcript-derived topics)
+*   **Processing Note:** Both transcript and comment data for a video are sent together in a single Stage 1 request. If only one data source is available (due to the other being disabled/unavailable), processing continues with the available data. All comment metadata (like_count, author_name, author_channel_id, parent_comment_id, published_at) is excluded from AI input to minimize token costs - this metadata is retrieved via SQL joins during database insertion using the comment_id reference.
 
-*   **Stage 2 Output Structure:** JSON array of atomic insight objects for database insertion:
-    *   TODO: Define complete JSON schema for Stage 2 atomic insights with all required fields, data types, and validation rules for Pydantic model creation
+*   **Stage 1 Output Structure:** JSON object containing compressed data:
+```json
+{
+  "compressed_transcript": "[00:00:37] Setting up Wi-Fi controlled irrigation timers for overhead sprinklers and drip lines... [00:02:42] Tax exemptions and expense tracking with Farm Raised app...",
+  "compressed_comments": [
+    {
+      "comment_id": "xyz123",
+      "compressed_text": "Great explanation of drip irrigation costs - premium $3 connectors vs economy $0.25 alternatives work equally well"
+    },
+    {
+      "comment_id": "abc456",
+      "compressed_text": "How long do the Wi-Fi timers typically last before needing replacement?"
+    }
+  ]
+}
+```
+*   **Pydantic Validation:**
+    *   `compressed_transcript` (str, required)
+    *   `compressed_comments` (List[CompressedComment], required)
+    *   CompressedComment: `comment_id` (str, required), `compressed_text` (str, required)
+*   **Processing Note:** Each comment is individually compressed/filtered. AI only returns comment_id and compressed_text to minimize token costs. The `compressed_comments` array (containing only comment_id and compressed_text pairs) is JSON-encoded and stored directly in the database without adding metadata. Comment metadata (like_count, author_name, author_channel_id, parent_comment_id) remains in the `RawComments` table and is accessed via SQL joins on comment_id when needed by Stage 2 or queries.
 
-*   **Stage 3 Output Structure:** Vector embeddings from Gemini API:
-    *   TODO: Define exact structure and validation for embedding vectors returned from Gemini's embedding API
+*   **Stage 2 Input Structure:** Compressed data fetched from the `CompressedData` table:
+    *   **Compressed Transcript Input:** The `compressed_transcript` text field with embedded timestamps (e.g., `"[00:00:37] Setting up Wi-Fi controlled irrigation timers... [00:02:42] Tax tracking..."`)
+    *   **Compressed Comments Input:** Comment ID and compressed text pairs for attribution and token efficiency:
+```json
+[
+  {
+    "comment_id": "xyz123",
+    "compressed_text": "Great explanation of drip irrigation costs - premium $3 connectors vs economy $0.25 alternatives work equally well"
+  },
+  {
+    "comment_id": "abc456",
+    "compressed_text": "How long do the Wi-Fi timers typically last before needing replacement?"
+  }
+]
+```
+*   **Processing Note:** Both compressed transcript and compressed comments for a video are sent together in a single Stage 2 request, allowing the AI to cross-reference topics and insights across both data sources. Only comment_id is sent for source attribution - all comment metadata (like_count, author_name, author_channel_id, parent_comment_id) remains in the `RawComments` table and is retrieved via SQL joins on comment_id when storing the Stage 2 results to `TopicSummaries` and `AtomicInsights` tables.
+
+*   **Stage 2 Output Structure:** Hierarchical JSON object containing topics with nested atomic insights - AI returns text with inline timestamp syntax:
+```json
+{
+  "topics": [
+    {
+      "topic_title": "Automated Irrigation Setup",
+      "summary_text": "Detailed explanation of {installing Wi-Fi controlled timers [00:04:34|00:06:23]} for {automated garden irrigation systems [00:01:03]} with both {overhead sprinklers [00:06:54]} and {drip lines [00:11:45]}.",
+      "source_type": "transcript",
+      "confidence_score": 95,
+      "comment_id": null,
+      "atomic_insights": [
+        {
+          "insight_type": "quantitative",
+          "insight_text": "{Wi-Fi irrigation timers [00:04:34|00:06:23]} cost {$45-60 per unit [00:04:51]}",
+          "confidence_score": 90
+        },
+        {
+          "insight_type": "qualitative",
+          "insight_text": "{Automated irrigation systems [00:01:03]} reduce {manual labor requirements [00:12:20]} for garden maintenance",
+          "confidence_score": 88
+        }
+      ]
+    },
+    {
+      "topic_title": "Equipment Cost Discussion",
+      "summary_text": "Viewer discussion comparing different price points for drip line connectors and irrigation components.",
+      "source_type": "comment",
+      "confidence_score": 78,
+      "comment_id": "xyz123",
+      "atomic_insights": [
+        {
+          "insight_type": "quantitative",
+          "insight_text": "Premium drip connectors cost $3 while economy alternatives are $0.25",
+          "confidence_score": 85
+        }
+      ]
+    }
+  ]
+}
+```
+*   **Inline Timestamp Syntax:** AI uses `{text [timestamp|timestamp]}` format to couple relevant information with video timestamps. Curly braces group text chunks, square brackets contain timestamps in HH:MM:SS format, pipe character separates multiple timestamps. Comment-derived content has no timestamps since comments aren't tied to the video timeline.
+*   **Pydantic Validation:**
+    *   Topic: `topic_title` (str, required), `summary_text` (str, required), `source_type` (Literal["transcript", "comment"], required), `confidence_score` (int, 1-100), `comment_id` (Optional[str]), `atomic_insights` (List[AtomicInsight], required)
+    *   AtomicInsight: `insight_type` (Literal["quantitative", "qualitative"], required), `insight_text` (str, required), `confidence_score` (int, 1-100)
+*   **Processing Note:** The nested structure is flattened during database insertion. For each topic, processing logic parses the inline timestamp syntax from AI output:
+    1. **Parse Syntax:** Extract text chunks and timestamps from `{text [timestamp|timestamp]}` format
+    2. **Generate Clean Text:** Remove all syntax to produce clean readable text (e.g., `"Detailed explanation of installing Wi-Fi controlled timers for automated garden irrigation systems..."`)
+    3. **Build Timestamp Mapping:** Create JSON array of segments: `[{"text": "installing Wi-Fi controlled timers", "timestamps": ["00:04:34", "00:06:23"]}, ...]`
+    4. **Store Topic:** Insert into `TopicSummaries` table with `summary_text` = clean text, `summary_timestamps` = JSON mapping (NULL for comment-derived topics)
+    5. **Store Insights:** For each atomic insight, parse its inline syntax similarly, inherit relevant timestamp mappings from parent topic, and insert into `AtomicInsights` table with `insight_text` = clean text, `insight_timestamps` = inherited mappings, `summary_id` = foreign key to parent
+    6. **Comment Topics:** For comment-derived topics/insights, `summary_timestamps` and `insight_timestamps` are NULL; `comment_id` stored as foreign key to `RawComments`
+
+*   **Stage 3 Input Structure:** Atomic insights fetched from the `AtomicInsights` table for embedding generation:
+    *   **Input per request**: The clean text directly from the `insight_text` column (no parsing needed)
+    *   **Example**: `"Wi-Fi irrigation timers cost $45-60 per unit"`
+*   **Processing Note:** Each atomic insight is processed individually with one API call per insight. The processing logic reads the clean text directly from the `insight_text` column, sends it to the embedding API, and tracks which `insight_id` corresponds to each request so the returned embedding vector can be stored in the correct `AtomicInsights` record. Only the clean text is sent to the API - timestamps and metadata are not needed for embedding generation.
+
+*   **Stage 3 Output Structure:** Vector embedding returned from Gemini embedding API:
+    *   **Output format**: Array (list) of floating-point numbers representing the semantic embedding vector
+    *   **Example structure**:
+```json
+{
+  "embedding": [0.012, -0.043, 0.089, -0.123, 0.056, ...]
+}
+```
+*   **Processing Note:** The embedding vector is extracted from the API response and stored as a BLOB in the `embedding_vector` column of the `AtomicInsights` table for the corresponding `insight_id`. The vector dimensionality is determined by the Gemini embedding model used (configurable in `config.py`).
 
 #### **Data Model / Schema**
 
@@ -237,22 +348,29 @@ A Python-based tool to download video transcripts and comments from YouTube chan
         *   `published_at` (DATETIME) --- *When the comment was originally posted.*
         *   `downloaded_at` (DATETIME) --- *Timestamp when the comment was fetched.*
 
+    *   **`CompressedData` Table**
+        *   `compressed_id` (INTEGER, Primary Key) --- *Unique identifier for each compressed data record.*
+        *   `video_id` (TEXT, Foreign Key) --- *Links to the `Videos` table.*
+        *   `compressed_transcript` (TEXT) --- *Filtered and compressed transcript text with all timestamps preserved.*
+        *   `compressed_comments` (TEXT) --- *JSON-encoded array of compressed comment objects, each containing only comment_id and compressed_text. Comment metadata is accessed via SQL joins to `RawComments` table using comment_id when needed.*
+        *   `processed_at` (DATETIME) --- *Timestamp when compression was performed.*
+
     *   **`TopicSummaries` Table**
         *   `summary_id` (INTEGER, Primary Key) --- *Unique identifier for each topic-based summary blurb.*
         *   `video_id` (TEXT, Foreign Key) --- *Links to the `Videos` table.*
         *   `topic_title` (TEXT) --- *Brief descriptive title for the topic.*
-        *   `summary_text` (TEXT) --- *The AI-generated paragraph summary of a specific topic from the video.*
+        *   `summary_text` (TEXT) --- *Clean summary text without timestamp syntax, optimized for fast browsing and FTS5 full-text search indexing.*
+        *   `summary_timestamps` (TEXT) --- *JSON array mapping text segments to video timestamps: `[{"text": "chunk", "timestamps": ["00:04:34", "00:06:23"]}]`. NULL for comment-derived topics.*
         *   `source_type` (TEXT) --- *The origin of this topic: 'transcript' or 'comment'.*
-        *   `representative_timestamp` (TEXT) --- *Representative timestamp for navigation (HH:MM:SS format), NULL for comment-derived topics.*
         *   `confidence_score` (INTEGER) --- *AI confidence score (1-100) for topic relevance and value.*
-        *   `like_count` (INTEGER) --- *NULL for transcript-derived topics, like count for comment-derived topics.*
+        *   `comment_id` (TEXT, Foreign Key) --- *NULL for transcript-derived topics, references `RawComments.comment_id` for comment-derived topics to enable metadata lookup via SQL joins.*
 
     *   **`AtomicInsights` Table**
         *   `insight_id` (INTEGER, Primary Key) --- *Unique identifier for each atomic insight.*
         *   `summary_id` (INTEGER, Foreign Key referencing `TopicSummaries`) --- *Links each insight back to its source topic summary.*
         *   `insight_type` (TEXT) --- *The data classification: `"quantitative"` or `"qualitative"`.*
         *   `confidence_score` (INTEGER) --- *The AI's score (1-100) of the insight's relevance and value.*
-        *   `insight_text` (TEXT) --- *A single, concise sentence that describes this specific atomic insight.*
+        *   `insight_text` (TEXT) --- *Clean insight text without timestamp syntax, optimized for fast browsing, searching, and embedding generation.*
+        *   `insight_timestamps` (TEXT) --- *JSON array of timestamp mappings inherited from parent TopicSummary, maintaining precise text-to-timestamp relationships. NULL for comment-derived insights.*
         *   `embedding_vector` (BLOB) --- *The vector embedding representation of the insight_text for semantic search.*
-        *   `source_type` (TEXT) --- *Inherited from parent TopicSummary: 'transcript' or 'comment'.*
-        *   `like_count` (INTEGER) --- *Inherited from parent TopicSummary: NULL for transcript, like count for comments.*
+        *   `source_type` (TEXT) --- *Inherited from parent TopicSummary: 'transcript' or 'comment'. For comment-derived insights, metadata is accessed by joining through `TopicSummaries` to `RawComments` via comment_id.*
