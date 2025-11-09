@@ -15,3 +15,14 @@
 
 timestamp=$(date +%Y-%m-%d_%H%M%S)
 python main.py 2>&1 | tee "data/run_${timestamp}.log"
+exit_code=$?
+echo "==================================================================="
+echo "Process exited with code: $exit_code"
+echo "Exit code meanings:"
+echo "  0   = Normal exit"
+echo "  1   = General error"
+echo "  130 = Terminated by Ctrl+C (SIGINT)"
+echo "  137 = Killed by SIGKILL"
+echo "  143 = Terminated by SIGTERM"
+echo "==================================================================="
+exit $exit_code

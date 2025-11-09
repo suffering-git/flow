@@ -5,17 +5,62 @@ Provides structured logging with:
 - Log levels: DEBUG, INFO, WARNING, ERROR
 - Emoji indicators for quick visual identification
 - Colored output using colorama
-- Optional file logging
+- Optional file logging with session-specific files
 """
 
 import logging
 import sys
+from datetime import datetime
 from colorama import Fore, Style, init
 
 import config
 
 # Initialize colorama for cross-platform colored output
 init(autoreset=True)
+
+# Global session timestamp for log file naming
+_session_timestamp = None
+
+
+def set_session_timestamp(timestamp: str = None) -> str:
+    """
+    Set the session timestamp for log file naming.
+
+    Args:
+        timestamp: Optional timestamp string. If None, generates current timestamp.
+
+    Returns:
+        The timestamp that was set.
+    """
+    global _session_timestamp
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    _session_timestamp = timestamp
+    return timestamp
+
+
+def get_session_log_path() -> str:
+    """
+    Get the session-specific log file path.
+
+    Returns:
+        Path to the log file for this session.
+    """
+    global _session_timestamp
+
+    # CRITICAL: Ensure timestamp is set exactly once, as early as possible
+    # Reason: Multiple modules call get_logger() at import time
+    # We need them all to use the SAME timestamp
+    if _session_timestamp is None:
+        # Set timestamp to current time
+        _session_timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+    # Replace .log extension with _TIMESTAMP.log
+    base_path = config.LOG_FILE_PATH
+    if base_path.endswith('.log'):
+        base_path = base_path[:-4]
+
+    return f"{base_path}_{_session_timestamp}.log"
 
 
 # Custom formatter with emoji indicators
@@ -89,11 +134,13 @@ def get_logger(name: str) -> logging.Logger:
         logger.addHandler(console_handler)
 
         # File handler (optional) with UTF-8 encoding for emoji support
+        # Uses session-specific log files (e.g., app_2025-11-08_145405.log)
         if config.FILE_LOGGING_ENABLED:
             import os
-            os.makedirs(os.path.dirname(config.LOG_FILE_PATH), exist_ok=True)
+            log_file_path = get_session_log_path()
+            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
 
-            file_handler = logging.FileHandler(config.LOG_FILE_PATH, encoding='utf-8')
+            file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
             file_handler.setFormatter(
                 logging.Formatter(
                     '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',

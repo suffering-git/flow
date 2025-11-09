@@ -4,7 +4,10 @@
       "WebSearch",
       "mcp__ide__getDiagnostics",
       "WebFetch(domain:github.com)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(cat:*)",
+      "Bash(sqlite3:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

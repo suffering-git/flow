@@ -3,31 +3,49 @@ Language detection and translation utilities.
 
 Provides helpers for:
 - Language detection using langdetect
-- Translation using deep-translator (GoogleTranslator)
+- Translation using argostranslate (offline, fast, free)
 - Error handling for translation failures
 """
 
 from typing import Optional, Tuple
 from langdetect import detect, LangDetectException
-from deep_translator import GoogleTranslator
+import argostranslate.translate
+import argostranslate.package
+import threading
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Global lock for package installation to prevent concurrent downloads
+_package_install_lock = threading.Lock()
 
 
 class TranslationHelper:
     """
     Helper class for language detection and translation.
 
-    Uses deep-translator for more reliable translation service.
+    Uses Argos Translate for fast, offline, free translation.
     """
 
     def __init__(self):
         """Initialize translation helper."""
-        # Note: GoogleTranslator is instantiated per translation call
-        # This avoids session management issues
-        pass
+        # Load installed languages once at initialization
+        # Reason: Caching improves performance for repeated translations
+        self.installed_languages = argostranslate.translate.get_installed_languages()
+
+        # Build translation lookup cache: {from_code: translator}
+        self.translators = {}
+        for lang in self.installed_languages:
+            if lang.code != 'en':
+                # Get translation object from this language to English
+                translation = lang.get_translation(
+                    argostranslate.translate.get_language_from_code('en')
+                )
+                if translation:
+                    self.translators[lang.code] = translation
+
+        logger.info(f"✅ Initialized translation helper with {len(self.translators)} language pairs")
 
     def detect_and_translate(self, text: str) -> Tuple[str, str, bool]:
         """
@@ -87,9 +105,70 @@ class TranslationHelper:
             logger.debug(f"🟡 Language detection failed: {e}")
             return None
 
+    def _download_language_pack(self, from_code: str) -> bool:
+        """
+        Download and install a language pack if available.
+
+        Args:
+            from_code: Source language code to download.
+
+        Returns:
+            True if successfully downloaded and installed, False otherwise.
+        """
+        # Use lock to prevent multiple threads from downloading the same pack
+        # Reason: Concurrent downloads could cause corruption or duplicate work
+        with _package_install_lock:
+            # Check if pack was installed by another thread while we waited
+            if from_code in self.translators:
+                return True
+
+            try:
+                logger.info(f"📦 Downloading language pack: {from_code} → en")
+
+                # Update package index to get latest available packages
+                argostranslate.package.update_package_index()
+                available_packages = argostranslate.package.get_available_packages()
+
+                # Find the package for this language to English
+                target_package = None
+                for pkg in available_packages:
+                    if pkg.from_code == from_code and pkg.to_code == 'en':
+                        target_package = pkg
+                        break
+
+                if not target_package:
+                    logger.warning(f"🟡 No language pack available for {from_code} → en")
+                    return False
+
+                # Download and install the package
+                download_path = target_package.download()
+                argostranslate.package.install_from_path(download_path)
+
+                # Reload installed languages and rebuild cache
+                self.installed_languages = argostranslate.translate.get_installed_languages()
+
+                # Add the new translator to cache
+                from_lang = argostranslate.translate.get_language_from_code(from_code)
+                to_lang = argostranslate.translate.get_language_from_code('en')
+
+                if from_lang and to_lang:
+                    translation = from_lang.get_translation(to_lang)
+                    if translation:
+                        self.translators[from_code] = translation
+                        logger.info(f"✅ Successfully installed {from_code} → en language pack")
+                        return True
+
+                return False
+
+            except Exception as e:
+                logger.warning(f"🟡 Failed to download language pack {from_code}: {e}")
+                return False
+
     def translate_to_english(self, text: str, source_lang: str) -> Optional[str]:
         """
-        Translate text to English using deep-translator.
+        Translate text to English using Argos Translate.
+
+        Automatically downloads missing language packs if needed.
 
         Args:
             text: Input text.
@@ -99,10 +178,24 @@ class TranslationHelper:
             Translated text or None if translation fails.
         """
         try:
-            # Create translator instance for this specific translation
-            translator = GoogleTranslator(source=source_lang, target='en')
+            # Check if we have a translator for this language
+            translator = self.translators.get(source_lang)
+
+            if not translator:
+                # Try to download the language pack automatically
+                logger.debug(f"🔍 No translator cached for {source_lang}, attempting auto-download...")
+                if self._download_language_pack(source_lang):
+                    # Successfully downloaded, get the translator
+                    translator = self.translators.get(source_lang)
+                else:
+                    # Download failed, cannot translate
+                    logger.debug(f"🟡 No translator available for language: {source_lang}")
+                    return None
+
+            # Translate using cached translator
+            # Reason: Argos Translate is fast (50-200ms) and fully offline
             result = translator.translate(text)
             return result
         except Exception as e:
-            logger.warning(f"🟡 Translation failed: {e}")
+            logger.warning(f"🟡 Translation failed for {source_lang}: {e}")
             return None

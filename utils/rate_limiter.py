@@ -112,8 +112,9 @@ class RateLimiter:
         Logs warnings when approaching thresholds.
         """
         # Calculate percentage of limits used
-        rpm_percent = (self.current_minute_requests / self.limits.rpm) * 100
-        tpm_percent = (self.current_minute_tokens / self.limits.tpm) * 100
+        # Reason: TypedDict is a regular dict at runtime, use bracket access
+        rpm_percent = (self.current_minute_requests / self.limits["rpm"]) * 100
+        tpm_percent = (self.current_minute_tokens / self.limits["tpm"]) * 100
 
         # Check against warning thresholds
         for threshold in config.RATE_LIMIT_WARNING_THRESHOLDS:
@@ -121,14 +122,14 @@ class RateLimiter:
             if rpm_percent >= threshold and rpm_percent < threshold + 10:
                 logger.warning(
                     f"⚠️  RPM at {rpm_percent:.1f}% "
-                    f"({self.current_minute_requests}/{self.limits.rpm})"
+                    f"({self.current_minute_requests}/{self.limits['rpm']})"
                 )
 
             # Check TPM threshold
             if tpm_percent >= threshold and tpm_percent < threshold + 10:
                 logger.warning(
                     f"⚠️  TPM at {tpm_percent:.1f}% "
-                    f"({self.current_minute_tokens:,}/{self.limits.tpm:,})"
+                    f"({self.current_minute_tokens:,}/{self.limits['tpm']:,})"
                 )
 
     def _log_usage_summary(self) -> None:

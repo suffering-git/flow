@@ -58,6 +58,17 @@ class TranscriptFetcher:
         """
         logger.info("🔄 Starting transcript fetching")
 
+        try:
+            return await self._fetch_all_transcripts_impl()
+        except Exception as e:
+            logger.error(f"❌ Unhandled exception in fetch_all_transcripts: {e}", exc_info=True)
+            raise
+        finally:
+            logger.info("🔄 Transcript fetching method exiting")
+
+    async def _fetch_all_transcripts_impl(self) -> None:
+        """Implementation of transcript fetching."""
+
         # Get all pending videos
         pending_videos = self.db_manager.fetchall(
             """
@@ -82,7 +93,27 @@ class TranscriptFetcher:
                 # Check for shutdown/pause signals
                 if shutdown_requested.is_set() or pause_requested.is_set():
                     return
-                await self.fetch_transcript(video_id)
+                # Wrap with timeout to prevent indefinite hanging
+                # Reason: Prevent individual transcripts from hanging the pipeline
+                try:
+                    await asyncio.wait_for(
+                        self.fetch_transcript(video_id),
+                        timeout=config.TRANSCRIPT_FETCH_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ Transcript fetch timed out for {video_id}")
+                    # Mark as failed in database
+                    from datetime import datetime
+                    with self.db_manager.transaction() as cursor:
+                        cursor.execute(
+                            """
+                            UPDATE Status
+                            SET transcript_status = 'failed',
+                                last_updated = ?
+                            WHERE video_id = ?
+                            """,
+                            (datetime.now(), video_id)
+                        )
 
         # Create tasks for all videos
         tasks = [fetch_with_semaphore(vid) for vid in video_ids]

@@ -52,6 +52,17 @@ class CommentFetcher:
         """
         logger.info("🔄 Starting comment fetching")
 
+        try:
+            return await self._fetch_all_comments_impl()
+        except Exception as e:
+            logger.error(f"❌ Unhandled exception in fetch_all_comments: {e}", exc_info=True)
+            raise
+        finally:
+            logger.info("🔄 Comment fetching method exiting")
+
+    async def _fetch_all_comments_impl(self) -> None:
+        """Implementation of comment fetching."""
+
         # Get all pending videos
         pending_videos = self.db_manager.fetchall(
             """
@@ -67,16 +78,43 @@ class CommentFetcher:
         video_ids = [row['video_id'] for row in pending_videos]
         logger.info(f"💬 Fetching comments for {len(video_ids)} videos")
 
-        # Create tasks for all videos
+        # Create tasks for all videos with overall timeout per video
+        # Reason: Prevent individual videos from hanging the entire pipeline
         tasks = []
         for video_id in video_ids:
             # Check for shutdown/pause signals
             if shutdown_requested.is_set() or pause_requested.is_set():
                 break
-            tasks.append(self.fetch_comments(video_id))
+            # Wrap each fetch with timeout to prevent indefinite hanging
+            tasks.append(
+                asyncio.wait_for(
+                    self.fetch_comments(video_id),
+                    timeout=config.COMMENT_FETCH_TIMEOUT
+                )
+            )
 
         # Execute concurrently (semaphore in fetch_comments controls rate)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle timeout failures - mark videos as failed in database
+        timeout_video_ids = []
+        for video_id, result in zip(video_ids, results):
+            if isinstance(result, asyncio.TimeoutError):
+                timeout_video_ids.append(video_id)
+
+        if timeout_video_ids:
+            logger.warning(f"⚠️ {len(timeout_video_ids)} videos timed out during comment fetching")
+            with self.db_manager.transaction() as cursor:
+                for video_id in timeout_video_ids:
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET comments_status = 'failed',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (datetime.now(), video_id)
+                    )
 
         # Log summary statistics
         try:
@@ -126,82 +164,85 @@ class CommentFetcher:
                         )
                         # Exponential backoff
                         await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
-                all_comments = []
-                next_page_token = None
 
-                # Paginate through all comment threads
-                while True:
-                    request = self.youtube.commentThreads().list(
-                        part="snippet,replies",
-                        videoId=video_id,
-                        maxResults=100,
-                        pageToken=next_page_token
-                    )
+                    all_comments = []
+                    next_page_token = None
 
-                    # Execute request in thread pool (it's synchronous)
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        request.execute
-                    )
+                    # Paginate through all comment threads
+                    while True:
+                        request = self.youtube.commentThreads().list(
+                            part="snippet,replies",
+                            videoId=video_id,
+                            maxResults=100,
+                            pageToken=next_page_token
+                        )
 
-                    # Process each comment thread
-                    for item in response.get('items', []):
-                        # Process top-level comment
-                        processed_comment = self._process_comment(item)
-                        processed_comment['video_id'] = video_id
-                        all_comments.append(processed_comment)
+                        # Execute request in thread pool (it's synchronous)
+                        # Wrap with timeout to prevent indefinite hanging
+                        # Reason: Google API client can hang on network issues
+                        loop = asyncio.get_event_loop()
+                        response = await asyncio.wait_for(
+                            loop.run_in_executor(None, request.execute),
+                            timeout=config.COMMENT_REQUEST_TIMEOUT
+                        )
 
-                        # Process replies if any
-                        if 'replies' in item:
-                            for reply in item['replies']['comments']:
-                                processed_reply = self._process_comment(reply)
-                                processed_reply['video_id'] = video_id
-                                all_comments.append(processed_reply)
+                        # Process each comment thread
+                        for item in response.get('items', []):
+                            # Process top-level comment
+                            processed_comment = self._process_comment(item)
+                            processed_comment['video_id'] = video_id
+                            all_comments.append(processed_comment)
 
-                    # Check for more pages
-                    next_page_token = response.get('nextPageToken')
-                    if not next_page_token:
-                        break
+                            # Process replies if any
+                            if 'replies' in item:
+                                for reply in item['replies']['comments']:
+                                    processed_reply = self._process_comment(reply)
+                                    processed_reply['video_id'] = video_id
+                                    all_comments.append(processed_reply)
 
-                # Store all comments in database
-                if all_comments:
-                    with self.db_manager.transaction() as cursor:
-                        for comment in all_comments:
-                            # Reason: Use INSERT OR IGNORE to handle re-runs gracefully
-                            # (comments may already exist from previous runs)
+                        # Check for more pages
+                        next_page_token = response.get('nextPageToken')
+                        if not next_page_token:
+                            break
+
+                    # Store all comments in database
+                    if all_comments:
+                        with self.db_manager.transaction() as cursor:
+                            for comment in all_comments:
+                                # Reason: Use INSERT OR IGNORE to handle re-runs gracefully
+                                # (comments may already exist from previous runs)
+                                cursor.execute(
+                                    """
+                                    INSERT OR IGNORE INTO RawComments
+                                    (comment_id, video_id, author_name, author_channel_id,
+                                     comment_text, original_language, is_translated,
+                                     parent_comment_id, like_count, published_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        comment['comment_id'],
+                                        comment['video_id'],
+                                        comment['author_name'],
+                                        comment['author_channel_id'],
+                                        comment['comment_text'],
+                                        comment['original_language'],
+                                        comment['is_translated'],
+                                        comment['parent_comment_id'],
+                                        comment['like_count'],
+                                        comment['published_at']
+                                    )
+                                )
+
+                            # Update status
                             cursor.execute(
                                 """
-                                INSERT OR IGNORE INTO RawComments
-                                (comment_id, video_id, author_name, author_channel_id,
-                                 comment_text, original_language, is_translated,
-                                 parent_comment_id, like_count, published_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                UPDATE Status
+                                SET comments_status = 'downloaded',
+                                    last_updated = ?
+                                WHERE video_id = ?
                                 """,
-                                (
-                                    comment['comment_id'],
-                                    comment['video_id'],
-                                    comment['author_name'],
-                                    comment['author_channel_id'],
-                                    comment['comment_text'],
-                                    comment['original_language'],
-                                    comment['is_translated'],
-                                    comment['parent_comment_id'],
-                                    comment['like_count'],
-                                    comment['published_at']
-                                )
+                                (datetime.now(), video_id)
                             )
-
-                        # Update status
-                        cursor.execute(
-                            """
-                            UPDATE Status
-                            SET comments_status = 'downloaded',
-                                last_updated = ?
-                            WHERE video_id = ?
-                            """,
-                            (datetime.now(), video_id)
-                        )
 
                     # Log success at DEBUG level with details
                     logger.debug(
@@ -230,6 +271,29 @@ class CommentFetcher:
                         # Transient HTTP error - leave as pending (don't retry quota errors)
                         logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
                         break  # Don't retry HTTP errors
+
+                except asyncio.TimeoutError:
+                    # Request timeout - retry with backoff
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"⚠️ Request timeout for {video_id} (attempt {attempt + 1}/{max_retries + 1})"
+                        )
+                        continue  # Retry
+                    else:
+                        logger.error(
+                            f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: Request timeout"
+                        )
+                        with self.db_manager.transaction() as cursor:
+                            cursor.execute(
+                                """
+                                UPDATE Status
+                                SET comments_status = 'failed',
+                                    last_updated = ?
+                                WHERE video_id = ?
+                                """,
+                                (datetime.now(), video_id)
+                            )
+                        break
 
                 except (OSError, ConnectionError, TimeoutError) as e:
                     # SSL/network errors - retry with backoff

@@ -46,8 +46,18 @@ STOP_AFTER_STAGE: Literal["downloads", "stage_1", "stage_2", "stage_3"] | None =
 # Maximum concurrent transcript downloads (Webshare allows up to 500)
 MAX_TRANSCRIPT_CONCURRENCY: int = 500
 
+# Timeout for transcript download operations (seconds)
+TRANSCRIPT_FETCH_TIMEOUT: int = 120
+
 # Maximum concurrent comment API requests (respect 10 RPS limit)
 MAX_COMMENT_CONCURRENCY: int = 10
+
+# Timeout for individual comment API requests (seconds)
+COMMENT_REQUEST_TIMEOUT: int = 30
+
+# Overall timeout for fetching all comments from a single video (seconds)
+# This accounts for pagination - videos with many comments may take longer
+COMMENT_FETCH_TIMEOUT: int = 300
 
 # =============================================================================
 # AI Model Configuration

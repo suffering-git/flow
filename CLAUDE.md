@@ -35,4 +35,3 @@
 
 ### Context References
 - For up to date gemini rate limit and pricing, refer to: GEMINI_RATES.md
-- For youtube_transcript_api documentation, refer to: TRANSCRIPTS.md
