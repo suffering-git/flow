@@ -44,7 +44,7 @@ STOP_AFTER_STAGE: Literal["downloads", "stage_1", "stage_2", "stage_3"] | None =
 # =============================================================================
 
 # Maximum concurrent transcript downloads (Webshare allows up to 500)
-MAX_TRANSCRIPT_CONCURRENCY: int = 500
+MAX_TRANSCRIPT_CONCURRENCY: int = 100
 
 # Timeout for transcript download operations (seconds)
 TRANSCRIPT_FETCH_TIMEOUT: int = 120
@@ -88,6 +88,17 @@ LOG_USAGE_EVERY_N_REQUESTS: int = 100
 
 # Log API usage summary every X tokens
 LOG_USAGE_EVERY_X_TOKENS: int = 1_000_000
+
+# =============================================================================
+# Gemini Client Configuration
+# =============================================================================
+
+# Maximum number of retries for failed API requests
+GEMINI_MAX_RETRIES: int = 5
+
+# Initial backoff delay in seconds for API retries
+GEMINI_INITIAL_BACKOFF: float = 2.0
+
 
 # =============================================================================
 # Database Reset Configuration

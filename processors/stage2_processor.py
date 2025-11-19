@@ -267,6 +267,17 @@ class Stage2Processor:
                     topic.summary_text
                 )
 
+                # Verify comment_id exists, otherwise set to NULL
+                comment_id = topic.comment_id
+                if comment_id:
+                    comment_exists = cursor.execute(
+                        "SELECT 1 FROM RawComments WHERE comment_id = ?",
+                        (comment_id,)
+                    ).fetchone()
+                    if not comment_exists:
+                        logger.warning(f"Comment ID {comment_id} not found in RawComments, setting to NULL.")
+                        comment_id = None
+
                 # Store topic summary
                 cursor.execute(
                     """
@@ -282,7 +293,7 @@ class Stage2Processor:
                         json.dumps(parsed_summary['timestamped_segments']),
                         topic.source_type,
                         topic.confidence_score,
-                        topic.comment_id
+                        comment_id
                     )
                 )
 

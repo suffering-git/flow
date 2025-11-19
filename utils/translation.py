@@ -7,6 +7,7 @@ Provides helpers for:
 - Error handling for translation failures
 """
 
+import json
 from typing import Optional, Tuple
 from langdetect import detect, LangDetectException
 import argostranslate.translate
@@ -44,6 +45,13 @@ class TranslationHelper:
                 )
                 if translation:
                     self.translators[lang.code] = translation
+        
+        self.download_attempts_file = ".download_attempts.json"
+        try:
+            with open(self.download_attempts_file, "r") as f:
+                self.attempted_downloads = set(json.load(f))
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.attempted_downloads = set()
 
         logger.info(f"✅ Initialized translation helper with {len(self.translators)} language pairs")
 
@@ -115,6 +123,13 @@ class TranslationHelper:
         Returns:
             True if successfully downloaded and installed, False otherwise.
         """
+        if from_code in self.attempted_downloads:
+            logger.debug(f"Skipping download for {from_code}, already attempted this session.")
+            return False
+        
+        self.attempted_downloads.add(from_code)
+        with open(self.download_attempts_file, "w") as f:
+            json.dump(list(self.attempted_downloads), f)
         # Use lock to prevent multiple threads from downloading the same pack
         # Reason: Concurrent downloads could cause corruption or duplicate work
         with _package_install_lock:
@@ -161,6 +176,8 @@ class TranslationHelper:
                 return False
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 logger.warning(f"🟡 Failed to download language pack {from_code}: {e}")
                 return False
 

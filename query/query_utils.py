@@ -61,12 +61,11 @@ class QueryUtils:
                 ts.topic_title,
                 v.video_title,
                 v.video_id
-            FROM insights_fts fts
+            FROM AtomicInsights_fts fts
             JOIN AtomicInsights ai ON fts.rowid = ai.insight_id
             JOIN TopicSummaries ts ON ai.summary_id = ts.summary_id
             JOIN Videos v ON ts.video_id = v.video_id
-            WHERE insights_fts MATCH ?
-            ORDER BY rank
+            WHERE AtomicInsights_fts MATCH ?
             LIMIT ?
             """,
             (query, limit)

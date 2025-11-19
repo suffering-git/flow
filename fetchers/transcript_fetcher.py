@@ -12,7 +12,7 @@ import asyncio
 from typing import Optional
 from datetime import datetime
 
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 from youtube_transcript_api.proxies import WebshareProxyConfig
 from youtube_transcript_api._errors import NoTranscriptFound
 
@@ -93,27 +93,7 @@ class TranscriptFetcher:
                 # Check for shutdown/pause signals
                 if shutdown_requested.is_set() or pause_requested.is_set():
                     return
-                # Wrap with timeout to prevent indefinite hanging
-                # Reason: Prevent individual transcripts from hanging the pipeline
-                try:
-                    await asyncio.wait_for(
-                        self.fetch_transcript(video_id),
-                        timeout=config.TRANSCRIPT_FETCH_TIMEOUT
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ Transcript fetch timed out for {video_id}")
-                    # Mark as failed in database
-                    from datetime import datetime
-                    with self.db_manager.transaction() as cursor:
-                        cursor.execute(
-                            """
-                            UPDATE Status
-                            SET transcript_status = 'failed',
-                                last_updated = ?
-                            WHERE video_id = ?
-                            """,
-                            (datetime.now(), video_id)
-                        )
+                await self.fetch_transcript(video_id)
 
         # Create tasks for all videos
         tasks = [fetch_with_semaphore(vid) for vid in video_ids]
@@ -247,6 +227,19 @@ class TranscriptFetcher:
                     """
                     UPDATE Status
                     SET transcript_status = 'unavailable',
+                        last_updated = ?
+                    WHERE video_id = ?
+                    """,
+                    (datetime.now(), video_id)
+                )
+        except TranscriptsDisabled:
+            # Transcripts are disabled for this video
+            logger.warning(f"🟡 Transcripts disabled: {video_id}")
+            with self.db_manager.transaction() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE Status
+                    SET transcript_status = 'disabled',
                         last_updated = ?
                     WHERE video_id = ?
                     """,
