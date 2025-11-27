@@ -1,1 +1,11 @@
-{"image":"mcr.microsoft.com/devcontainers/universal:2"}
+{
+    "image": "mcr.microsoft.com/devcontainers/universal:2",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "google.gemini-cli-vscode-ide-companion",
+                "github.remotehub"
+            ]
+        }
+    }
+}
