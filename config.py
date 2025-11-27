@@ -37,7 +37,7 @@ CHANNEL_IDS: list[str] = [
 # =============================================================================
 
 # Stop after specific stage: 'downloads', 'stage_1', 'stage_2', 'stage_3', or None for full pipeline
-STOP_AFTER_STAGE: Literal["downloads", "stage_1", "stage_2", "stage_3"] | None = None
+STOP_AFTER_STAGE: Literal["downloads", "stage_1", "stage_2", "stage_3"] | None = "downloads"
 
 # =============================================================================
 # Fetcher Configuration
