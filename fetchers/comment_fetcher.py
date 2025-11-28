@@ -96,26 +96,6 @@ class CommentFetcher:
         # Execute concurrently (semaphore in fetch_comments controls rate)
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Handle timeout failures - mark videos as failed in database
-        timeout_video_ids = []
-        for video_id, result in zip(video_ids, results):
-            if isinstance(result, asyncio.TimeoutError):
-                timeout_video_ids.append(video_id)
-
-        if timeout_video_ids:
-            logger.warning(f"⚠️ {len(timeout_video_ids)} videos timed out during comment fetching")
-            with self.db_manager.transaction() as cursor:
-                for video_id in timeout_video_ids:
-                    cursor.execute(
-                        """
-                        UPDATE Status
-                        SET comments_status = 'failed',
-                            last_updated = ?
-                        WHERE video_id = ?
-                        """,
-                        (datetime.now(), video_id)
-                    )
-
         # Log summary statistics
         try:
             stats = self.db_manager.fetchone("""
@@ -253,6 +233,7 @@ class CommentFetcher:
                     break
 
                 except HttpError as e:
+                    error_reason = e.reason if hasattr(e, 'reason') else str(e)
                     # Check if comments are disabled (permanent failure)
                     if 'commentsDisabled' in str(e):
                         logger.warning(f"🟡 Comments disabled: {video_id}")
@@ -267,10 +248,23 @@ class CommentFetcher:
                                 (datetime.now(), video_id)
                             )
                         break  # Don't retry for disabled comments
+                    elif 'videoNotFound' in str(e) or 'forbidden' in str(e):
+                        logger.error(f"❌ Permanent error fetching comments for {video_id}: {error_reason}")
+                        with self.db_manager.transaction() as cursor:
+                            cursor.execute(
+                                """
+                                UPDATE Status
+                                SET comments_status = 'failed',
+                                    last_updated = ?
+                                WHERE video_id = ?
+                                """,
+                                (datetime.now(), video_id)
+                            )
+                        break
                     else:
-                        # Transient HTTP error - leave as pending (don't retry quota errors)
-                        logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
-                        break  # Don't retry HTTP errors
+                        # Transient or unknown HTTP error - leave as pending
+                        logger.error(f"❌ HTTP error for {video_id}: {error_reason} - leaving as pending.")
+                        break  # Don't retry in this run
 
                 except asyncio.TimeoutError:
                     # Request timeout - retry with backoff
@@ -283,16 +277,6 @@ class CommentFetcher:
                         logger.error(
                             f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: Request timeout"
                         )
-                        with self.db_manager.transaction() as cursor:
-                            cursor.execute(
-                                """
-                                UPDATE Status
-                                SET comments_status = 'failed',
-                                    last_updated = ?
-                                WHERE video_id = ?
-                                """,
-                                (datetime.now(), video_id)
-                            )
                         break
 
                 except (OSError, ConnectionError, TimeoutError) as e:
@@ -307,20 +291,10 @@ class CommentFetcher:
                         )
                         continue  # Retry
                     else:
-                        # Max retries exhausted - mark as failed
+                        # Max retries exhausted - log and leave as pending
                         logger.error(
                             f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: {e}"
                         )
-                        with self.db_manager.transaction() as cursor:
-                            cursor.execute(
-                                """
-                                UPDATE Status
-                                SET comments_status = 'failed',
-                                    last_updated = ?
-                                WHERE video_id = ?
-                                """,
-                                (datetime.now(), video_id)
-                            )
                         break
 
                 except Exception as e:
@@ -337,24 +311,13 @@ class CommentFetcher:
                         )
                         continue  # Retry
                     else:
-                        # Non-retryable or max retries exhausted
+                        # Non-retryable or max retries exhausted, log and leave as pending
                         if attempt >= max_retries:
                             logger.error(
                                 f"❌ Failed to fetch comments {video_id} after {max_retries + 1} attempts: {e}"
                             )
                         else:
-                            logger.error(f"❌ Failed to fetch comments {video_id}: {e}")
-
-                        with self.db_manager.transaction() as cursor:
-                            cursor.execute(
-                                """
-                                UPDATE Status
-                                SET comments_status = 'failed',
-                                    last_updated = ?
-                                WHERE video_id = ?
-                                """,
-                                (datetime.now(), video_id)
-                            )
+                            logger.error(f"❌ Unhandled error for {video_id}: {e}")
                         break
 
     def _process_comment(self, comment_data: dict[str, Any]) -> dict[str, Any]:

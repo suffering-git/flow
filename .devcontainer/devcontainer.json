@@ -4,7 +4,9 @@
         "vscode": {
             "extensions": [
                 "google.gemini-cli-vscode-ide-companion",
-                "github.remotehub"
+                "yzhang.markdown-all-in-one",
+                "ms-python.python",
+                "ms-toolsai.jupyter"
             ]
         }
     }
