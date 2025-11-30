@@ -76,29 +76,9 @@ async def main(logger) -> None:
         transcript_fetcher = TranscriptFetcher(db_manager)
         comment_fetcher = CommentFetcher(db_manager)
 
-        try:
-            logger.info("🔄 Launching asyncio.gather() for concurrent fetching...")
-            results = await asyncio.gather(
-                transcript_fetcher.fetch_all_transcripts(),
-                comment_fetcher.fetch_all_comments(),
-                return_exceptions=True
-            )
-            logger.info("✅ asyncio.gather() completed successfully")
-        except Exception as e:
-            logger.error(f"❌ asyncio.gather() raised exception: {e}", exc_info=True)
-            results = [e, e]  # Both failed
-        finally:
-            logger.info(f"📊 Active threads after fetch: {threading.active_count()}")
+        await transcript_fetcher.fetch_all_transcripts()
+        comment_fetcher.fetch_all_comments()
 
-        # Check if any exceptions occurred
-        logger.info(f"📊 Checking results from {len(results)} fetchers...")
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                fetcher_name = ['transcript', 'comment'][i]
-                logger.error(f"❌ {fetcher_name} fetching failed: {result}", exc_info=result)
-            else:
-                fetcher_name = ['transcript', 'comment'][i]
-                logger.info(f"✅ {fetcher_name} fetcher returned successfully")
 
         if config.STOP_AFTER_STAGE == "downloads":
             logger.info("🎯 Stopped after downloads as configured")
