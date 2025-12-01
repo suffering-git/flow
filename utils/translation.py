@@ -7,12 +7,14 @@ Provides helpers for:
 - Error handling for translation failures
 """
 import os
+import json
 from typing import Optional, Tuple
 
 import argostranslate.package
 import argostranslate.translate
 from lingua import Language, LanguageDetectorBuilder
 from google.cloud import translate_v2 as translate
+from google.oauth2 import service_account
 
 from utils.logger import get_logger
 
@@ -27,7 +29,9 @@ class TranslationHelper:
     """
 
     def __init__(self):
-        """Initialize translation helper."""
+        """
+        Initialize translation helper.
+        """
         # Reason: Initialize Lingua in low accuracy mode to save memory.
         # Preload only the languages we have Argos packs for.
         self.detector = (
@@ -45,17 +49,26 @@ class TranslationHelper:
             .build()
         )
 
-        # Initialize Google Translate client
+        # Initialize Google Translate client with provided service account credentials
         self.google_translate_client = None
-        try:
-            # The client will automatically find credentials from the environment
-            # (GOOGLE_APPLICATION_CREDENTIALS)
-            self.google_translate_client = translate.Client()
-            logger.info("✅ Google Translate client initialized.")
-        except Exception as e:
-            logger.warning(f"🟡 Google Translate client failed to initialize: {e}")
-            logger.warning("🟡 Google Translate fallback will be disabled.")
-
+        self.argos_translated_count = 0
+        self.argos_failed_count = 0
+        self.google_translated_count = 0
+        self.google_failed_count = 0
+        self.google_char_count_per_language = {} # {lang_code: char_count}
+        credentials_json = os.getenv('GOOGLE_CLOUD_CREDENTIALS')
+        if credentials_json:
+            try:
+                credentials_dict = json.loads(credentials_json)
+                credentials = service_account.Credentials.from_service_account_info(credentials_dict)
+                self.google_translate_client = translate.Client(credentials=credentials)
+                logger.info("✅ Google Translate client initialized with service account credentials.")
+            except json.JSONDecodeError:
+                logger.warning("🟡 GOOGLE_CLOUD_CREDENTIALS is not valid JSON. Google Translate fallback disabled.")
+            except Exception as e:
+                logger.warning(f"🟡 Google Translate client failed to initialize: {e}. Google Translate fallback disabled.")
+        else:
+            logger.warning("🟡 GOOGLE_CLOUD_CREDENTIALS not set. Google Translate fallback disabled.")
 
         # Load installed languages once at initialization
         self.installed_languages = argostranslate.translate.get_installed_languages()
@@ -86,6 +99,7 @@ class TranslationHelper:
 
         if detected_lang is None:
             logger.debug("🟡 Could not detect language, keeping original text")
+            self.argos_failed_count += 1
             return (text, "unknown", False)
 
         if detected_lang == "en":
@@ -98,9 +112,14 @@ class TranslationHelper:
                 f"🟡 Translation from {detected_lang} failed or not supported, "
                 f"keeping original text"
             )
+            # Failure already logged in translate_to_english, just increment generic fail
             return (text, detected_lang, False)
 
         logger.debug(f"🌐 Translated from {detected_lang} to English")
+        if self.translators.get(detected_lang): # If translated by Argos
+            self.argos_translated_count += 1
+        else: # If translated by Google
+            self.google_translated_count += 1
         return (translated, detected_lang, True)
 
     def detect_language(self, text: str) -> Optional[str]:
@@ -138,6 +157,7 @@ class TranslationHelper:
             translator = self.translators.get(source_lang)
 
             if translator:
+                self.argos_translated_count += 1
                 return translator.translate(text)
 
             # Fallback to Google Translate if available
@@ -147,9 +167,13 @@ class TranslationHelper:
                     result = self.google_translate_client.translate(
                         text, target_language='en', source_language=source_lang
                     )
+                    self.google_translated_count += 1
+                    self.google_char_count_per_language[source_lang] = \
+                        self.google_char_count_per_language.get(source_lang, 0) + len(text)
                     return result['translatedText']
                 except Exception as e:
                     logger.error(f"🔴 Google Translate API failed for {source_lang}: {e}")
+                    self.google_failed_count += 1
                     return None
 
             logger.debug(f"🟡 No local translator and Google Translate is disabled for {source_lang}.")
@@ -157,4 +181,21 @@ class TranslationHelper:
 
         except Exception as e:
             logger.warning(f"🟡 Translation failed for {source_lang}: {e}")
+            if self.translators.get(source_lang):
+                self.argos_failed_count += 1
             return None
+
+    def get_translation_stats(self) -> dict:
+        """
+        Get the current translation statistics.
+
+        Returns:
+            A dictionary containing translation statistics.
+        """
+        return {
+            "argos_translated_count": self.argos_translated_count,
+            "argos_failed_count": self.argos_failed_count,
+            "google_translated_count": self.google_translated_count,
+            "google_failed_count": self.google_failed_count,
+            "google_char_count_per_language": self.google_char_count_per_language,
+        }

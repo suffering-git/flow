@@ -102,6 +102,7 @@ python main.py
 - **Never delete or overwrite existing code** unless explicitly instructed to.
 - If you are primarily asked a question, **answer it first** before making changes.
 - Anytime you make changes try to **ask clarifying questions first** to eliminiate ambiguity.
+- **Never** delete the main database: `data/youtube_data.db`
 
 ### Context References
 - For up to date gemini rate limits and pricing, refer to: GEMINI_RATES.md

@@ -8,7 +8,17 @@ AI processing to embedding generation.
 import asyncio
 import os
 from dotenv import load_dotenv
+from utils.logger import get_logger, set_session_timestamp, get_session_log_path
 
+# Load environment variables and set session timestamp as early as possible
+# Reason: Ensures consistent timestamp for all loggers and makes env vars available immediately
+load_dotenv()
+set_session_timestamp()
+
+# Get the logger after the timestamp is set
+logger = get_logger(__name__)
+
+# All other imports should come after the logger is ready
 import config
 from utils.signal_handler import setup_signal_handlers, shutdown_requested, pause_requested
 from utils.heartbeat import start_heartbeat, stop_heartbeat
@@ -20,16 +30,10 @@ from processors.stage1_processor import Stage1Processor
 from processors.stage2_processor import Stage2Processor
 from processors.stage3_processor import Stage3Processor
 
-# Logger will be created in __main__ after session timestamp is set
 
-
-async def main(logger) -> None:
+async def main() -> None:
     """
     Execute the complete data processing pipeline.
-
-    Args:
-        logger: Logger instance for this session.
-
     Pipeline stages:
     1. Channel & video discovery
     2. Transcript & comment downloads (concurrent)
@@ -37,22 +41,26 @@ async def main(logger) -> None:
     4. Stage 2: Topic extraction & atomic insights
     5. Stage 3: Embedding generation
     """
-    try:
-        # Load environment variables from .env file
-        load_dotenv()
+    # Use the globally initialized logger
+    global logger
 
+    try:
         # Validate required environment variables
+        logger.debug("🔍 Validating environment variables.")
         required_env_vars = ["YOUTUBE_API_KEY", "GEMINI_API_KEY"]
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
             return
+        logger.debug("🔍 Environment variables validated.")
 
         # Setup signal handlers for graceful shutdown/pause
         setup_signal_handlers()
+        logger.debug("🔍 Signal handlers configured.")
 
         # Start heartbeat monitor for diagnostics
         start_heartbeat(interval=10)
+        logger.debug("🔍 Heartbeat monitor started.")
 
         logger.info("🎯 Starting YouTube Data Processing Pipeline")
 
@@ -114,8 +122,6 @@ async def main(logger) -> None:
 
         # Stage 5: Embedding generation (Stage 3)
         stage3 = Stage3Processor(db_manager)
-        await stage3.generate_all_embeddings()
-
         logger.info("✅ Pipeline completed successfully")
         logger.info("=" * 80)
 
@@ -131,12 +137,9 @@ async def main(logger) -> None:
 
 
 if __name__ == "__main__":
-    # Import logger utilities
-    from utils.logger import get_logger, get_session_log_path
-    import os
-
-    # Create logger (timestamp auto-set on first use, shared across all modules)
-    logger = get_logger(__name__)
+    # --- Early Initialization for Immediate Logging ---
+    logger.debug("🔍 .env loaded and initial logger created.")
+    logger.debug(f"🔍 Session timestamp set to {set_session_timestamp(None)}")
 
     # Extract session ID from log file path
     log_file = get_session_log_path()
@@ -150,7 +153,7 @@ if __name__ == "__main__":
 
     try:
         logger.info("🔄 Starting asyncio.run()")
-        asyncio.run(main(logger))
+        asyncio.run(main())
         logger.info("✅ asyncio.run() completed normally")
     except KeyboardInterrupt:
         logger.info("=" * 80)

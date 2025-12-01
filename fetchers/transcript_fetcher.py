@@ -112,21 +112,25 @@ class TranscriptFetcher:
         try:
             stats = self.db_manager.fetchone("""
                 SELECT
-                    COUNT(CASE WHEN transcript_status = 'downloaded' THEN 1 END) as succeeded,
-                    COUNT(CASE WHEN transcript_status = 'unavailable' THEN 1 END) as unavailable,
-                    COUNT(CASE WHEN transcript_status = 'pending' THEN 1 END) as failed
+                    COUNT(CASE WHEN transcript_status = 'downloaded' THEN 1 END) as downloaded_videos,
+                    COUNT(CASE WHEN transcript_status = 'unavailable' THEN 1 END) as unavailable_videos,
+                    COUNT(CASE WHEN transcript_status = 'permanently_failed' THEN 1 END) as permanently_failed_videos,
+                    COUNT(CASE WHEN transcript_status = 'disabled' THEN 1 END) as disabled_videos,
+                    COUNT(CASE WHEN transcript_status = 'pending' THEN 1 END) as pending_videos
                 FROM Status
             """)
 
             logger.info(
                 f"✅ Transcript fetching completed: "
-                f"{stats['succeeded']} succeeded, "
-                f"{stats['unavailable']} unavailable, "
-                f"{stats['failed']} failed"
+                f"{stats['downloaded_videos']} videos with transcripts downloaded, "
+                f"{stats['unavailable_videos']} videos had no transcripts, "
+                f"{stats['disabled_videos']} videos had transcripts disabled, "
+                f"{stats['permanently_failed_videos']} videos permanently failed, "
+                f"{stats['pending_videos']} videos pending transcript fetching."
             )
         except Exception as e:
-            logger.warning(f"⚠️ Could not fetch transcript statistics: {e}")
-            logger.info("✅ Transcript fetching completed")
+            logger.warning(f"⚠️ Could not fetch transcript statistics: {e}", exc_info=True)
+            logger.info("✅ Transcript fetching completed with errors in statistics logging.")
 
     async def fetch_transcript(self, video_id: str) -> None:
         """
@@ -254,8 +258,59 @@ class TranscriptFetcher:
                 )
 
         except Exception as e:
-            # Transient error - leave as pending
-            logger.error(f"❌ Failed to fetch transcript {video_id}: {e}")
+            error_message = str(e)
+            current_time = datetime.now()
+
+            with self.db_manager.transaction() as cursor:
+                # Retrieve current failure count and last failure date
+                status_info = cursor.execute(
+                    "SELECT transcript_failure_count, transcript_last_failure_date FROM Status WHERE video_id = ?",
+                    (video_id,)
+                ).fetchone()
+
+                failure_count = status_info['transcript_failure_count'] if status_info else 0
+                last_failure_date_str = status_info['transcript_last_failure_date'] if status_info else None
+
+                if "The requested language is not translatable" in error_message:
+                    failure_count += 1
+                    transcript_status = 'pending' # Default to pending, update later if permanently failed
+
+                    if last_failure_date_str:
+                        last_failure_date = datetime.strptime(last_failure_date_str, "%Y-%m-%d %H:%M:%S.%f")
+                        # Check if failures span multiple days
+                        if failure_count >= 5 and (current_time.date() - last_failure_date.date()).days >= 1:
+                            transcript_status = 'permanently_failed'
+                            logger.error(f"❌ Permanently failed to fetch transcript {video_id}: {error_message} (after {failure_count} attempts over multiple days)")
+                        else:
+                            logger.warning(f"🟡 Failed to fetch transcript {video_id}: {error_message} (attempt {failure_count})")
+                    else:
+                        # First time this specific error occurs, just warn
+                        logger.warning(f"🟡 Failed to fetch transcript {video_id}: {error_message} (attempt {failure_count})")
+
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET transcript_status = ?,
+                            transcript_failure_count = ?,
+                            transcript_last_failure_date = ?,
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (transcript_status, failure_count, current_time, current_time, video_id)
+                    )
+
+                else:
+                    # Other transient errors, log as error but keep as pending for retry
+                    logger.error(f"❌ Failed to fetch transcript {video_id}: {error_message}", exc_info=True)
+                    cursor.execute(
+                        """
+                        UPDATE Status
+                        SET transcript_status = 'pending',
+                            last_updated = ?
+                        WHERE video_id = ?
+                        """,
+                        (current_time, video_id)
+                    )
 
     def _embed_timestamps(
         self,

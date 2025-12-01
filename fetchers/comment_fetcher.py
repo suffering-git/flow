@@ -100,22 +100,39 @@ class CommentFetcher:
         try:
             stats = self.db_manager.fetchone("""
                 SELECT
-                    COUNT(CASE WHEN comments_status = 'downloaded' THEN 1 END) as succeeded,
-                    COUNT(CASE WHEN comments_status = 'disabled' THEN 1 END) as disabled,
-                    COUNT(CASE WHEN comments_status = 'pending' THEN 1 END) as failed,
-                    (SELECT COUNT(*) FROM RawComments) as total_comments
+                    COUNT(CASE WHEN comments_status = 'downloaded' THEN 1 END) as downloaded_videos,
+                    COUNT(CASE WHEN comments_status = 'disabled' THEN 1 END) as disabled_videos,
+                    COUNT(CASE WHEN comments_status = 'failed' THEN 1 END) as failed_videos,
+                    COUNT(CASE WHEN comments_status = 'pending' THEN 1 END) as pending_videos,
+                    (SELECT COUNT(*) FROM RawComments) as total_comments_downloaded
                 FROM Status
             """)
 
             logger.info(
                 f"✅ Comment fetching completed: "
-                f"{stats['succeeded']} videos succeeded ({stats['total_comments']:,} comments), "
-                f"{stats['disabled']} disabled, "
-                f"{stats['failed']} failed"
+                f"{stats['downloaded_videos']} videos with comments downloaded "
+                f"({stats['total_comments_downloaded']:,} comments total), "
+                f"{stats['disabled_videos']} videos had comments disabled, "
+                f"{stats['failed_videos']} videos failed comment fetching, "
+                f"{stats['pending_videos']} videos pending comment fetching."
             )
+
+            # Log detailed translation statistics
+            translation_stats = self.translation_helper.get_translation_stats()
+            if translation_stats['argos_translated_count'] > 0 or \
+                translation_stats['google_translated_count'] > 0:
+                logger.info(
+                    f"🌐 Translation Stats: "
+                    f"Argos Translated: {translation_stats['argos_translated_count']:,}, "
+                    f"Argos Failed: {translation_stats['argos_failed_count']:,}; "
+                    f"Google Translated: {translation_stats['google_translated_count']:,}, "
+                    f"Google Failed: {translation_stats['google_failed_count']:,}; "
+                    f"Google Chars by Lang: {translation_stats['google_char_count_per_language']}"
+                )
+
         except Exception as e:
-            logger.warning(f"⚠️ Could not fetch comment statistics: {e}")
-            logger.info("✅ Comment fetching completed")
+            logger.warning(f"⚠️ Could not fetch comment statistics: {e}", exc_info=True)
+            logger.info("✅ Comment fetching completed with errors in statistics logging.")
 
     def fetch_comments(self, video_id: str) -> None:
         """
@@ -230,7 +247,7 @@ class CommentFetcher:
                 error_reason = e.reason if hasattr(e, 'reason') else str(e)
                 # Check if comments are disabled (permanent failure)
                 if 'commentsDisabled' in str(e):
-                    logger.warning(f"🟡 Comments disabled: {video_id}")
+                    logger.debug(f"🔍 💬 Comments disabled: {video_id}")
                     with self.db_manager.transaction() as cursor:
                         cursor.execute(
                             """

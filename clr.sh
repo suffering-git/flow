@@ -31,8 +31,13 @@ done
 cd data || exit 1
 
 # Count files to be deleted
-APP_COUNT=$(find . -name "app_*.log" -type f -mtime +$DAYS 2>/dev/null | wc -l)
-RUN_COUNT=$(find . -name "run_*.log" -type f -mtime +$DAYS 2>/dev/null | wc -l)
+if [ "$DAYS" -eq 0 ]; then
+    APP_COUNT=$(find . -name "app_*.log" -type f 2>/dev/null | wc -l)
+    RUN_COUNT=$(find . -name "run_*.log" -type f 2>/dev/null | wc -l)
+else
+    APP_COUNT=$(find . -name "app_*.log" -type f -mtime +$DAYS 2>/dev/null | wc -l)
+    RUN_COUNT=$(find . -name "run_*.log" -type f -mtime +$DAYS 2>/dev/null | wc -l)
+fi
 TOTAL=$((APP_COUNT + RUN_COUNT))
 
 if [ $TOTAL -eq 0 ]; then
@@ -48,7 +53,11 @@ echo
 if [ "$AUTO_DELETE" = false ]; then
     # Interactive mode - ask for confirmation
     echo "Files to be deleted:"
-    find . -name "app_*.log" -o -name "run_*.log" -type f -mtime +$DAYS | head -20
+    if [ "$DAYS" -eq 0 ]; then
+        find . -name "app_*.log" -o -name "run_*.log" -type f | head -20
+    else
+        find . -name "app_*.log" -o -name "run_*.log" -type f -mtime +$DAYS | head -20
+    fi
     if [ $TOTAL -gt 20 ]; then
         echo "  ... and $((TOTAL - 20)) more"
     fi
@@ -63,7 +72,12 @@ fi
 
 # Delete files
 echo "Deleting..."
-find . -name "app_*.log" -type f -mtime +$DAYS -delete
-find . -name "run_*.log" -type f -mtime +$DAYS -delete
+if [ "$DAYS" -eq 0 ]; then
+    find . -name "app_*.log" -type f -delete
+    find . -name "run_*.log" -type f -delete
+else
+    find . -name "app_*.log" -type f -mtime +$DAYS -delete
+    find . -name "run_*.log" -type f -mtime +$DAYS -delete
+fi
 
 echo "✅ Deleted $TOTAL log files."

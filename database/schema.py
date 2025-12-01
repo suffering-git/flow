@@ -54,6 +54,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             stage_1_status TEXT NOT NULL DEFAULT 'pending',
             stage_2_status TEXT NOT NULL DEFAULT 'pending',
             embedding_status TEXT NOT NULL DEFAULT 'pending',
+            transcript_failure_count INTEGER NOT NULL DEFAULT 0,
+            transcript_last_failure_date TEXT,
             last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (video_id) REFERENCES Videos(video_id)
         )

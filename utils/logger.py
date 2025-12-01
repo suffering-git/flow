@@ -52,8 +52,8 @@ def get_session_log_path() -> str:
     # Reason: Multiple modules call get_logger() at import time
     # We need them all to use the SAME timestamp
     if _session_timestamp is None:
-        # Set timestamp to current time
-        _session_timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        raise RuntimeError("Session timestamp not set. Call set_session_timestamp() first.")
+
 
     # Replace .log extension with _TIMESTAMP.log
     base_path = config.LOG_FILE_PATH
