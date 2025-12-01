@@ -20,33 +20,9 @@ PRIORITY_LANGUAGES = [
     'pt',  # Portuguese
     'fr',  # French
     'de',  # German
-    'it',  # Italian
     'ru',  # Russian
     'ja',  # Japanese
     'ko',  # Korean
-    'zh',  # Chinese
-    'ar',  # Arabic
-    'hi',  # Hindi
-    'nl',  # Dutch
-    'pl',  # Polish
-    'tr',  # Turkish
-    'id',  # Indonesian
-    'th',  # Thai
-    'vi',  # Vietnamese
-    'sv',  # Swedish
-    'da',  # Danish
-    'no',  # Norwegian
-    'fi',  # Finnish
-    'cs',  # Czech
-    'sk',  # Slovak
-    'ro',  # Romanian
-    'hu',  # Hungarian
-    'el',  # Greek
-    'uk',  # Ukrainian
-    'ca',  # Catalan
-    'hr',  # Croatian
-    'sl',  # Slovenian
-    'af',  # Afrikaans
 ]
 
 print(f"\nInstalling language packs for {len(PRIORITY_LANGUAGES)} languages...")

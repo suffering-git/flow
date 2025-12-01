@@ -69,13 +69,20 @@ class TranscriptFetcher:
     async def _fetch_all_transcripts_impl(self) -> None:
         """Implementation of transcript fetching."""
 
-        # Get all pending videos
-        pending_videos = self.db_manager.fetchall(
-            """
-            SELECT video_id FROM Status
-            WHERE transcript_status = 'pending'
-            """
-        )
+        # Base query to find pending transcripts
+        query = """
+            SELECT s.video_id FROM Status s
+            JOIN Videos v ON s.video_id = v.video_id
+            WHERE s.transcript_status = 'pending'
+        """
+        params = []
+
+        # Conditionally add filter for test data
+        if config.PROCESS_TEST_DATA_ONLY:
+            query += " AND v.is_test_data = ?"
+            params.append(True)
+
+        pending_videos = self.db_manager.fetchall(query, tuple(params))
 
         if not pending_videos:
             logger.info("✅ No pending transcripts to fetch")

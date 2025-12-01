@@ -50,14 +50,21 @@ class Stage3Processor:
         """
         logger.info("🔄 Starting Stage 3 embedding generation")
 
-        # Get all videos ready for Stage 3
-        ready_videos = self.db_manager.fetchall(
-            """
-            SELECT video_id FROM Status
-            WHERE stage_2_status = 'complete'
-              AND embedding_status = 'pending'
-            """
-        )
+        # Base query to find videos ready for Stage 3
+        query = """
+            SELECT s.video_id FROM Status s
+            JOIN Videos v ON s.video_id = v.video_id
+            WHERE s.stage_2_status = 'complete'
+              AND s.embedding_status = 'pending'
+        """
+        params = []
+
+        # Conditionally add filter for test data
+        if config.PROCESS_TEST_DATA_ONLY:
+            query += " AND v.is_test_data = ?"
+            params.append(True)
+
+        ready_videos = self.db_manager.fetchall(query, tuple(params))
 
         if not ready_videos:
             logger.info("✅ No videos ready for Stage 3")

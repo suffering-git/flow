@@ -40,6 +40,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             duration_seconds INTEGER NOT NULL,
             view_count INTEGER NOT NULL,
             like_count INTEGER NOT NULL,
+            is_legacy_data BOOLEAN NOT NULL DEFAULT 0,
             FOREIGN KEY (channel_id) REFERENCES Channels(channel_id)
         )
     """)

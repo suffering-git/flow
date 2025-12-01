@@ -5,6 +5,10 @@ All user-configurable settings are managed here.
 """
 
 from typing import Literal
+from dotenv import load_dotenv
+
+load_dotenv() # Load environment variables at the very beginning
+
 
 # =============================================================================
 # Database Configuration
@@ -35,6 +39,9 @@ CHANNEL_IDS: list[str] = [
 # =============================================================================
 # Processing Configuration
 # =============================================================================
+
+# Whether to process only videos flagged as 'is_test_data'
+PROCESS_TEST_DATA_ONLY: bool = True
 
 # Stop after specific stage: 'downloads', 'stage_1', 'stage_2', 'stage_3', or None for full pipeline
 STOP_AFTER_STAGE: Literal["downloads", "stage_1", "stage_2", "stage_3"] | None = "downloads"
@@ -113,7 +120,7 @@ RESET_COMPRESSED_DATA: bool = False
 # =============================================================================
 
 # Log level: DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL: str = "INFO"
+LOG_LEVEL: str = "DEBUG"
 
 # Enable file logging in addition to console
 FILE_LOGGING_ENABLED: bool = True

@@ -64,13 +64,20 @@ class CommentFetcher:
     def _fetch_all_comments_impl(self) -> None:
         """Implementation of comment fetching."""
 
-        # Get all pending videos
-        pending_videos = self.db_manager.fetchall(
-            """
-            SELECT video_id FROM Status
-            WHERE comments_status = 'pending'
-            """
-        )
+        # Base query to find pending comments
+        query = """
+            SELECT s.video_id FROM Status s
+            JOIN Videos v ON s.video_id = v.video_id
+            WHERE s.comments_status = 'pending'
+        """
+        params = []
+
+        # Conditionally add filter for test data
+        if config.PROCESS_TEST_DATA_ONLY:
+            query += " AND v.is_test_data = ?"
+            params.append(True)
+
+        pending_videos = self.db_manager.fetchall(query, tuple(params))
 
         if not pending_videos:
             logger.info("✅ No pending comments to fetch")

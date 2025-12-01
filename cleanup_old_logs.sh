@@ -6,7 +6,7 @@
 #   bash cleanup_old_logs.sh --auto       # Auto-delete logs older than 7 days
 #   bash cleanup_old_logs.sh --days 30    # Delete logs older than 30 days
 
-DAYS=7
+DAYS=0
 AUTO_DELETE=false
 
 # Parse arguments
