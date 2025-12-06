@@ -207,8 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Project Specific - YouTube Data Processor
-data/
-*.db
+# data/
+# *.db
 *.db-journal
 *.sqlite
 *.sqlite3
