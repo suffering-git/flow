@@ -1,9 +1,8 @@
 """
-Comment fetching from YouTube Data API with language translation.
+Comment fetching from YouTube Data API.
 
 Handles:
 - Synchronous comment downloads with pagination
-- Language detection and translation
 - Thread structure preservation
 """
 
@@ -19,7 +18,6 @@ from httplib2 import Http
 import config
 from database.db_manager import DatabaseManager
 from utils.logger import get_logger
-from utils.translation import TranslationHelper
 from utils.signal_handler import shutdown_requested, pause_requested
 
 logger = get_logger(__name__)
@@ -27,7 +25,7 @@ logger = get_logger(__name__)
 
 class CommentFetcher:
     """
-    Fetches video comments with language translation support.
+    Fetches video comments.
     """
 
     def __init__(self, db_manager: DatabaseManager):
@@ -45,7 +43,6 @@ class CommentFetcher:
             developerKey=os.getenv("YOUTUBE_API_KEY"),
             http=http_client
         )
-        self.translation_helper = TranslationHelper()
 
     def fetch_all_comments(self) -> None:
         """
@@ -117,18 +114,7 @@ class CommentFetcher:
                 f"{stats['pending_videos']} videos pending comment fetching."
             )
 
-            # Log detailed translation statistics
-            translation_stats = self.translation_helper.get_translation_stats()
-            if translation_stats['argos_translated_count'] > 0 or \
-                translation_stats['google_translated_count'] > 0:
-                logger.info(
-                    f"🌐 Translation Stats: "
-                    f"Argos Translated: {translation_stats['argos_translated_count']:,}, "
-                    f"Argos Failed: {translation_stats['argos_failed_count']:,}; "
-                    f"Google Translated: {translation_stats['google_translated_count']:,}, "
-                    f"Google Failed: {translation_stats['google_failed_count']:,}; "
-                    f"Google Chars by Lang: {translation_stats['google_char_count_per_language']}"
-                )
+
 
         except Exception as e:
             logger.warning(f"⚠️ Could not fetch comment statistics: {e}", exc_info=True)
@@ -206,9 +192,8 @@ class CommentFetcher:
                                 """
                                 INSERT OR IGNORE INTO RawComments
                                 (comment_id, video_id, author_name, author_channel_id,
-                                    comment_text, original_language, is_translated,
-                                    parent_comment_id, like_count, published_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    comment_text, parent_comment_id, like_count, published_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 (
                                     comment['comment_id'],
@@ -216,8 +201,6 @@ class CommentFetcher:
                                     comment['author_name'],
                                     comment['author_channel_id'],
                                     comment['comment_text'],
-                                    comment['original_language'],
-                                    comment['is_translated'],
                                     comment['parent_comment_id'],
                                     comment['like_count'],
                                     comment['published_at']
@@ -333,7 +316,7 @@ class CommentFetcher:
 
     def _process_comment(self, comment_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Process a single comment (detect language, translate if needed).
+        Process a single comment.
 
         Args:
             comment_data: Raw comment data from API.
@@ -342,26 +325,7 @@ class CommentFetcher:
             Processed comment dictionary ready for database insertion.
         """
         # Extract metadata
-        metadata = self._extract_comment_metadata(comment_data)
-
-        # Detect language and translate if needed
-        original_text = metadata['comment_text']
-        translated_text, original_lang, is_translated = (
-            self.translation_helper.detect_and_translate(original_text)
-        )
-
-        # Return processed comment
-        return {
-            'comment_id': metadata['comment_id'],
-            'author_name': metadata['author_name'],
-            'author_channel_id': metadata['author_channel_id'],
-            'comment_text': translated_text,
-            'original_language': original_lang,
-            'is_translated': is_translated,
-            'parent_comment_id': metadata['parent_comment_id'],
-            'like_count': metadata['like_count'],
-            'published_at': metadata['published_at']
-        }
+        return self._extract_comment_metadata(comment_data)
 
     def _extract_comment_metadata(self, item: dict[str, Any]) -> dict[str, Any]:
         """

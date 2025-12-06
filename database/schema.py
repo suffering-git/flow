@@ -41,6 +41,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             view_count INTEGER NOT NULL,
             like_count INTEGER NOT NULL,
             is_legacy_data BOOLEAN NOT NULL DEFAULT 0,
+            is_test_data BOOLEAN NOT NULL DEFAULT 0,
             FOREIGN KEY (channel_id) REFERENCES Channels(channel_id)
         )
     """)
@@ -82,8 +83,6 @@ def create_schema(conn: sqlite3.Connection) -> None:
             author_name TEXT NOT NULL,
             author_channel_id TEXT NOT NULL,
             comment_text TEXT NOT NULL,
-            original_language TEXT NOT NULL,
-            is_translated BOOLEAN NOT NULL,
             parent_comment_id TEXT,
             like_count INTEGER NOT NULL,
             published_at DATETIME NOT NULL,
